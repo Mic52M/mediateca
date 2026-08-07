@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>Mediateca</string>
+    <key>CFBundleDisplayName</key>
+    <string>Mediateca</string>
+    <key>CFBundleExecutable</key>
+    <string>Mediateca</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.mediateca.player</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.video</string>
+
+    <!-- Fa comparire Mediateca in “Apri con” per qualsiasi file video -->
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Video</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>public.movie</string>
+                <string>public.video</string>
+                <string>public.avi</string>
+                <string>public.mpeg-4</string>
+                <string>com.apple.quicktime-movie</string>
+                <string>org.matroska.mkv</string>
+                <string>org.webmproject.webm</string>
+            </array>
+        </dict>
+    </array>
+
+    <!-- macOS non dichiara nativamente Matroska e WebM: senza queste voci i
+         file .mkv risultano disabilitati nel pannello di apertura. -->
+    <key>UTImportedTypeDeclarations</key>
+    <array>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>org.matroska.mkv</string>
+            <key>UTTypeDescription</key>
+            <string>Video Matroska</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.movie</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>mkv</string>
+                </array>
+                <key>public.mime-type</key>
+                <array>
+                    <string>video/x-matroska</string>
+                </array>
+            </dict>
+        </dict>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>org.webmproject.webm</string>
+            <key>UTTypeDescription</key>
+            <string>Video WebM</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.movie</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>webm</string>
+                </array>
+                <key>public.mime-type</key>
+                <array>
+                    <string>video/webm</string>
+                </array>
+            </dict>
+        </dict>
+    </array>
+
+    <!-- Messaggi mostrati da macOS quando l'app accede a queste cartelle -->
+    <key>NSDownloadsFolderUsageDescription</key>
+    <string>Per riprodurre i video che tieni nella cartella Download.</string>
+    <key>NSDocumentsFolderUsageDescription</key>
+    <string>Per riprodurre i video che tieni nella cartella Documenti.</string>
+    <key>NSDesktopFolderUsageDescription</key>
+    <string>Per riprodurre i video che tieni sulla Scrivania.</string>
+    <key>NSRemovableVolumesUsageDescription</key>
+    <string>Per riprodurre i video su dischi esterni.</string>
+</dict>
+</plist>

@@ -1,0 +1,12 @@
+# Artefatti di build
+app/build/
+build/
+*.app/
+DerivedData/
+
+# Log e file temporanei
+*.log
+.DS_Store
+
+# Dati utente / cache (non fanno parte del sorgente)
+*.xcuserstate
