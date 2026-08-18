@@ -26,6 +26,7 @@ final class VibraVidRunner: ObservableObject {
 
     enum DownloadTarget: Equatable {
         case newSeries(title: String, season: Int)
+        case newMovie(title: String)
         case appendTo(seriesID: UUID, season: Int)
     }
 

@@ -8,6 +8,7 @@ struct ImportSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State var draft: ImportDraft
     @State private var showPicker = false
+    @State private var isMovie = false
 
     private var isAddingToExisting: Bool { draft.targetSeriesID != nil }
 
@@ -53,31 +54,51 @@ struct ImportSheet: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(isAddingToExisting ? "Aggiungi episodi" : "Nuova serie")
-                .font(.title2).bold()
+            HStack {
+                Text(headerTitle).font(.title2).bold()
+                Spacer()
+                if !isAddingToExisting {
+                    Picker("", selection: $isMovie) {
+                        Text("Serie tv").tag(false)
+                        Text("Film").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(width: 220)
+                }
+            }
 
             HStack(alignment: .top, spacing: 14) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Titolo").font(.caption).foregroundStyle(.secondary)
-                    TextField("Es. Steins;Gate", text: $draft.title)
+                    Text(isMovie ? "Titolo del film" : "Titolo")
+                        .font(.caption).foregroundStyle(.secondary)
+                    TextField(isMovie ? "Es. Ritorno al futuro" : "Es. Steins;Gate",
+                              text: $draft.title)
                         .textFieldStyle(.roundedBorder)
                         .disabled(isAddingToExisting)
                 }
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Stagione").font(.caption).foregroundStyle(.secondary)
-                    Stepper(value: $draft.season, in: 1...99) {
-                        Text("\(draft.season)").monospacedDigit().frame(width: 28, alignment: .leading)
+                if !isMovie {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Stagione").font(.caption).foregroundStyle(.secondary)
+                        Stepper(value: $draft.season, in: 1...99) {
+                            Text("\(draft.season)").monospacedDigit().frame(width: 28, alignment: .leading)
+                        }
                     }
-                }
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Etichetta stagione (opzionale)").font(.caption).foregroundStyle(.secondary)
-                    TextField("Es. Prima stagione", text: $draft.seasonName)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 220)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Etichetta stagione (opzionale)").font(.caption).foregroundStyle(.secondary)
+                        TextField("Es. Prima stagione", text: $draft.seasonName)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 220)
+                    }
                 }
             }
         }
         .padding(20)
+    }
+
+    private var headerTitle: String {
+        if isAddingToExisting { return "Aggiungi episodi" }
+        return isMovie ? "Nuovo film" : "Nuova serie"
     }
 
     // MARK: Selezione file
@@ -170,17 +191,39 @@ struct ImportSheet: View {
         HStack {
             Button("Annulla") { model.importer = nil }
                 .keyboardShortcut(.cancelAction)
+
+            if isMovie && draft.items.count > 1 {
+                Text("Un film ha un solo file: verrà usato il primo.")
+                    .font(.caption).foregroundStyle(.orange)
+            }
+
             Spacer()
-            Button(isAddingToExisting
-                   ? "Aggiungi \(draft.items.count) episodi"
-                   : "Crea serie") {
-                model.commitImport(draft)
+            Button(confirmLabel) {
+                var toCommit = draft
+                if isMovie {
+                    // Un film è modellato come Series con 1 stagione da 1 episodio.
+                    toCommit.isMovie = true
+                    toCommit.season = 1
+                    toCommit.seasonName = ""
+                    if toCommit.items.count > 1 {
+                        toCommit.items = Array(toCommit.items.prefix(1))
+                    }
+                    toCommit.items = toCommit.items.map { item in
+                        var m = item; m.number = 1; return m
+                    }
+                }
+                model.commitImport(toCommit)
             }
             .buttonStyle(.borderedProminent)
             .keyboardShortcut(.defaultAction)
             .disabled(draft.items.isEmpty || (!isAddingToExisting && draft.title.trimmingCharacters(in: .whitespaces).isEmpty))
         }
         .padding(16)
+    }
+
+    private var confirmLabel: String {
+        if isAddingToExisting { return "Aggiungi \(draft.items.count) episodi" }
+        return isMovie ? "Aggiungi film" : "Crea serie"
     }
 
     // MARK: Azioni

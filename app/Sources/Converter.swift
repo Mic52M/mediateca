@@ -245,9 +245,14 @@ final class Converter: ObservableObject {
         guard let ffprobe = Converter.ffprobe else { return StreamInfo() }
         let p = Process()
         p.executableURL = URL(fileURLWithPath: ffprobe)
-        p.arguments = ["-v", "error", "-show_entries",
-                       "stream=index,codec_type,codec_name:stream_tags=language",
-                       "-of", "json", url.path]
+        var args = ["-v", "error"]
+        if url.pathExtension.lowercased() == "ts" {
+            args += ["-f", "mpegts"]
+        }
+        args += ["-show_entries",
+                 "stream=index,codec_type,codec_name:stream_tags=language",
+                 "-of", "json", url.path]
+        p.arguments = args
         let out = Pipe()
         p.standardOutput = out
         p.standardError = Pipe()
@@ -286,7 +291,14 @@ final class Converter: ObservableObject {
         let imageSubs = dropSubtitles ? [] : info.subtitles.filter { !$0.isText }
         let videoIsCompatible = ["h264", "hevc", "h265", "mpeg4"].contains(info.video)
 
-        var args = ["-y", "-hide_banner", "-i", source.path]
+        // Alcuni .ts scaricati da HLS (VibraVid & simili) non iniziano con
+        // il byte di sync 0x47, quindi ffmpeg non li riconosce da solo:
+        // forzare il demuxer risolve senza toccare il payload.
+        var args: [String] = ["-y", "-hide_banner"]
+        if source.pathExtension.lowercased() == "ts" {
+            args += ["-fflags", "+genpts+discardcorrupt", "-f", "mpegts"]
+        }
+        args += ["-i", source.path]
         var remux = true
         var burnedIn = false
 

@@ -157,6 +157,12 @@ final class AppModel: ObservableObject {
         data.series.flatMap { $0.seasons.flatMap(\.episodes) } + data.loose
     }
 
+    /// Serie tv in libreria (esclude i film).
+    var tvSeries: [Series] { data.series.filter { !$0.isMovie } }
+
+    /// Film in libreria.
+    var movies: [Series] { data.series.filter { $0.isMovie } }
+
     var continueWatching: [EpisodeRef] {
         allEpisodes
             .filter(\.started)
@@ -305,7 +311,9 @@ final class AppModel: ObservableObject {
             selection = .series(sid)
         } else {
             let season = Season(number: draft.season, name: draft.seasonName, episodes: episodes)
-            let s = Series(title: draft.title.isEmpty ? "Senza titolo" : draft.title, seasons: [season])
+            let s = Series(title: draft.title.isEmpty ? "Senza titolo" : draft.title,
+                           seasons: [season],
+                           kind: draft.isMovie ? .movie : .series)
             data.series.append(s)
             selection = .series(s.id)
         }
@@ -318,6 +326,26 @@ final class AppModel: ObservableObject {
     func deleteSeries(_ id: UUID) {
         data.series.removeAll { $0.id == id }
         if case .series(let sel) = selection, sel == id { selection = .home }
+        save()
+    }
+
+    /// Cambia il tipo di una voce fra film e serie tv. Serve per aggiustare
+    /// import fatti prima che esistesse la distinzione.
+    func toggleKind(_ id: UUID) {
+        guard let i = data.series.firstIndex(where: { $0.id == id }) else { return }
+        if data.series[i].isMovie {
+            data.series[i].kind = .series
+        } else {
+            data.series[i].kind = .movie
+            // Un film ha una sola stagione con un solo episodio: se ce ne sono
+            // di più li accorpiamo mantenendo il primo.
+            if let firstSeason = data.series[i].seasons.first,
+               let firstEp = firstSeason.episodes.first {
+                var ep = firstEp
+                ep.number = 1
+                data.series[i].seasons = [Season(number: 1, episodes: [ep])]
+            }
+        }
         save()
     }
 
@@ -489,6 +517,8 @@ final class AppModel: ObservableObject {
         switch target {
         case .newSeries(let title, let season):
             attach(ep, toSeries: title, season: season)
+        case .newMovie(let title):
+            attachMovie(ep, title: title)
         case .appendTo(let seriesID, let season):
             if let idx = data.series.firstIndex(where: { $0.id == seriesID }) {
                 attachTo(seriesIndex: idx, season: season, ep: ep)
@@ -522,6 +552,8 @@ final class AppModel: ObservableObject {
         case .newSeries(let title, let season):
             sIdx = data.series.firstIndex { $0.title.caseInsensitiveCompare(title) == .orderedSame }
             seasonNum = season
+        case .newMovie:
+            return 1
         case .appendTo(let id, let season):
             sIdx = data.series.firstIndex { $0.id == id }
             seasonNum = season
@@ -530,6 +562,24 @@ final class AppModel: ObservableObject {
               let seaIdx = data.series[sIdx].seasons.firstIndex(where: { $0.number == seasonNum })
         else { return 1 }
         return (data.series[sIdx].seasons[seaIdx].episodes.map(\.number).max() ?? 0) + 1
+    }
+
+    /// Aggiunge un film: un contenitore Series con kind=movie e una sola
+    /// "stagione" con un episodio (il file). Se esiste già un film con lo
+    /// stesso titolo lo sostituisce (fa da re-download).
+    private func attachMovie(_ ep: Episode, title: String) {
+        var movie = ep
+        movie.number = 1
+        if let idx = data.series.firstIndex(where: {
+            $0.isMovie && $0.title.caseInsensitiveCompare(title) == .orderedSame
+        }) {
+            data.series[idx].seasons = [Season(number: 1, episodes: [movie])]
+        } else {
+            let s = Series(title: title.isEmpty ? "Senza titolo" : title,
+                           seasons: [Season(number: 1, episodes: [movie])],
+                           kind: .movie)
+            data.series.append(s)
+        }
     }
 
     private func attachTo(seriesIndex sIdx: Int, season: Int, ep: Episode) {
@@ -588,6 +638,9 @@ struct ImportDraft: Identifiable {
     var season: Int = 1
     var seasonName: String = ""
     var items: [Item] = []
+    /// Se true, la commitImport crea una Series con kind = .movie (non
+    /// consigliato per accodamenti a serie esistenti).
+    var isMovie: Bool = false
 
     mutating func add(_ urls: [URL]) {
         let known = Set(items.map(\.url))

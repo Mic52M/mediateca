@@ -445,28 +445,29 @@ private struct DirectURLForm: View {
 /// sopravvivere ai suoi re-render e essere passato al runner al momento
 /// dell'avvio.
 struct DestinationChoice: Equatable {
-    enum Mode: String, CaseIterable { case newSeries, appendTo }
+    enum Mode: String, CaseIterable { case movie, newSeries, appendTo }
     var mode: Mode = .newSeries
     var newTitle: String = ""
     var appendSeriesID: UUID?
     var season: Int = 1
 
     /// Trasforma le scelte in un `DownloadTarget` concreto per il runner. Se
-    /// il nome della nuova serie è vuoto, si usa il titolo suggerito (query).
+    /// il nome della nuova serie/film è vuoto, si usa il titolo suggerito.
     func resolve(suggestedTitle: String) -> VibraVidRunner.DownloadTarget {
+        let effectiveTitle = newTitle.trimmingCharacters(in: .whitespaces).isEmpty
+            ? suggestedTitle.trimmingCharacters(in: .whitespaces)
+            : newTitle.trimmingCharacters(in: .whitespaces)
         switch mode {
+        case .movie:
+            return .newMovie(title: effectiveTitle.isEmpty ? "Senza titolo" : effectiveTitle)
         case .newSeries:
-            let title = newTitle.trimmingCharacters(in: .whitespaces).isEmpty
-                ? suggestedTitle.trimmingCharacters(in: .whitespaces)
-                : newTitle.trimmingCharacters(in: .whitespaces)
-            return .newSeries(title: title.isEmpty ? "Senza titolo" : title,
+            return .newSeries(title: effectiveTitle.isEmpty ? "Senza titolo" : effectiveTitle,
                               season: max(1, season))
         case .appendTo:
             if let id = appendSeriesID {
                 return .appendTo(seriesID: id, season: max(1, season))
             }
-            // Nessuna serie scelta ma modalità "accoda": fallback a nuova.
-            return .newSeries(title: suggestedTitle.isEmpty ? "Senza titolo" : suggestedTitle,
+            return .newSeries(title: effectiveTitle.isEmpty ? "Senza titolo" : effectiveTitle,
                               season: max(1, season))
         }
     }
@@ -481,6 +482,10 @@ private struct DestinationPicker: View {
     /// alla query così mentre digita "steins gate" il nome propone lo stesso.
     @State private var nameFollowsSuggestion = true
 
+    /// Solo le serie tv possono ricevere accodamenti — i film hanno 1 episodio
+    /// e stop, non ha senso "accodare" a un film.
+    private var seriesForAppending: [Series] { allSeries.filter { !$0.isMovie } }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
@@ -489,16 +494,33 @@ private struct DestinationPicker: View {
             }
 
             Picker("", selection: $choice.mode) {
+                Text("Film").tag(DestinationChoice.Mode.movie)
                 Text("Nuova serie").tag(DestinationChoice.Mode.newSeries)
-                Text("Accoda a serie esistente").tag(DestinationChoice.Mode.appendTo)
-                    .disabled(allSeries.isEmpty)
+                Text("Accoda a serie").tag(DestinationChoice.Mode.appendTo)
+                    .disabled(seriesForAppending.isEmpty)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .frame(maxWidth: 420)
+            .frame(maxWidth: 520)
 
             HStack(spacing: 10) {
                 switch choice.mode {
+                case .movie:
+                    TextField("Titolo del film",
+                              text: Binding(
+                                get: {
+                                    if nameFollowsSuggestion && choice.newTitle.isEmpty {
+                                        return suggestedTitle
+                                    }
+                                    return choice.newTitle
+                                },
+                                set: { new in
+                                    nameFollowsSuggestion = false
+                                    choice.newTitle = new
+                                }
+                              ))
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 340)
                 case .newSeries:
                     TextField("Nome della nuova serie",
                               text: Binding(
@@ -517,10 +539,10 @@ private struct DestinationPicker: View {
                         .frame(maxWidth: 340)
                 case .appendTo:
                     Picker("", selection: Binding(
-                        get: { choice.appendSeriesID ?? allSeries.first?.id ?? UUID() },
+                        get: { choice.appendSeriesID ?? seriesForAppending.first?.id ?? UUID() },
                         set: { choice.appendSeriesID = $0 }
                     )) {
-                        ForEach(allSeries) { s in
+                        ForEach(seriesForAppending) { s in
                             Text("\(s.title)  ·  \(s.episodeCount) ep.").tag(s.id)
                         }
                     }
@@ -528,19 +550,24 @@ private struct DestinationPicker: View {
                     .frame(width: 340)
                 }
 
-                HStack(spacing: 6) {
-                    Text("Stagione").foregroundStyle(.secondary).font(.callout)
-                    Stepper(value: $choice.season, in: 1...99) {
-                        Text("\(choice.season)").monospacedDigit().frame(width: 24, alignment: .leading)
+                if choice.mode != .movie {
+                    HStack(spacing: 6) {
+                        Text("Stagione").foregroundStyle(.secondary).font(.callout)
+                        Stepper(value: $choice.season, in: 1...99) {
+                            Text("\(choice.season)").monospacedDigit().frame(width: 24, alignment: .leading)
+                        }
+                        .frame(width: 130)
                     }
-                    .frame(width: 130)
                 }
             }
 
             if choice.mode == .appendTo,
-               let sid = choice.appendSeriesID ?? allSeries.first?.id,
-               let s = allSeries.first(where: { $0.id == sid }) {
+               let sid = choice.appendSeriesID ?? seriesForAppending.first?.id,
+               let s = seriesForAppending.first(where: { $0.id == sid }) {
                 Text(existingSeasonHint(for: s))
+                    .font(.caption).foregroundStyle(.secondary)
+            } else if choice.mode == .movie {
+                Text("Il film comparirà nella sezione “Film” della libreria.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -548,9 +575,7 @@ private struct DestinationPicker: View {
         .background(Color(nsColor: .controlBackgroundColor),
                     in: RoundedRectangle(cornerRadius: 8))
         .onAppear {
-            // Se ci sono serie e non è stato scelto nulla, preseleziona la prima
-            // per l'accoda: lo Stepper della stagione parte dalla prossima libera.
-            if choice.appendSeriesID == nil, let first = allSeries.first {
+            if choice.appendSeriesID == nil, let first = seriesForAppending.first {
                 choice.appendSeriesID = first.id
             }
         }
@@ -558,12 +583,10 @@ private struct DestinationPicker: View {
         .onChange(of: choice.mode) { _, _ in syncSeasonToTarget() }
     }
 
-    /// Quando l'utente sceglie "accoda", proponiamo per default la stagione
-    /// successiva a quella più alta già presente — è il caso comune.
     private func syncSeasonToTarget() {
         guard choice.mode == .appendTo,
               let sid = choice.appendSeriesID,
-              let s = allSeries.first(where: { $0.id == sid })
+              let s = seriesForAppending.first(where: { $0.id == sid })
         else { return }
         let maxSeason = s.seasons.map(\.number).max() ?? 0
         choice.season = maxSeason + 1

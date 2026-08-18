@@ -70,26 +70,14 @@ struct LibraryScreen: View {
                 Label("Impostazioni", systemImage: "gearshape")
                     .tag(AppModel.SidebarItem.settings)
 
-                Section("Le tue serie") {
-                    ForEach(model.data.series) { s in
-                        Label {
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(s.title).lineLimit(1)
-                                Text("\(s.episodeCount) episodi · \(s.seasons.count) stagion\(s.seasons.count == 1 ? "e" : "i")")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        } icon: {
-                            Image(systemName: "rectangle.stack")
-                        }
-                        .tag(AppModel.SidebarItem.series(s.id))
-                        .contextMenu {
-                            Button("Aggiungi episodi…") { model.beginImport(into: s.id) }
-                            Divider()
-                            Button("Rimuovi dalla libreria", role: .destructive) {
-                                model.deleteSeries(s.id)
-                            }
-                        }
+                if !model.tvSeries.isEmpty {
+                    Section("Serie tv") {
+                        ForEach(model.tvSeries) { s in sidebarRow(for: s) }
+                    }
+                }
+                if !model.movies.isEmpty {
+                    Section("Film") {
+                        ForEach(model.movies) { s in sidebarRow(for: s) }
                     }
                 }
             }
@@ -139,6 +127,36 @@ struct LibraryScreen: View {
         }
     }
 
+    @ViewBuilder
+    private func sidebarRow(for s: Series) -> some View {
+        let icon = s.isMovie ? "film" : "rectangle.stack"
+        let movieDuration = s.seasons.first?.episodes.first?.duration ?? 0
+        let subtitle = s.isMovie
+            ? (movieDuration > 0 ? formatTime(movieDuration) : "film")
+            : "\(s.episodeCount) episodi · \(s.seasons.count) stagion\(s.seasons.count == 1 ? "e" : "i")"
+        Label {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(s.title).lineLimit(1)
+                Text(subtitle).font(.caption).foregroundStyle(.secondary)
+            }
+        } icon: {
+            Image(systemName: icon)
+        }
+        .tag(AppModel.SidebarItem.series(s.id))
+        .contextMenu {
+            if !s.isMovie {
+                Button("Aggiungi episodi…") { model.beginImport(into: s.id) }
+            }
+            Button(s.isMovie ? "Converti in serie tv" : "Converti in film") {
+                model.toggleKind(s.id)
+            }
+            Divider()
+            Button("Rimuovi dalla libreria", role: .destructive) {
+                model.deleteSeries(s.id)
+            }
+        }
+    }
+
     private func handleDrop(_ providers: [NSItemProvider]) {
         Task {
             var urls: [URL] = []
@@ -180,12 +198,26 @@ struct HomeScreen: View {
                 if model.data.series.isEmpty && model.data.loose.isEmpty {
                     EmptyState()
                 } else {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Le tue serie").font(.title2).bold()
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: 16)],
-                                  alignment: .leading, spacing: 20) {
-                            ForEach(model.data.series) { s in
-                                SeriesCard(series: s)
+                    if !model.tvSeries.isEmpty {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Serie tv").font(.title2).bold()
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: 16)],
+                                      alignment: .leading, spacing: 20) {
+                                ForEach(model.tvSeries) { s in
+                                    SeriesCard(series: s)
+                                }
+                            }
+                        }
+                    }
+
+                    if !model.movies.isEmpty {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Film").font(.title2).bold()
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: 16)],
+                                      alignment: .leading, spacing: 20) {
+                                ForEach(model.movies) { s in
+                                    SeriesCard(series: s)
+                                }
                             }
                         }
                     }
@@ -369,16 +401,39 @@ struct SeriesCard: View {
                     .equatable()
                     .frame(height: 116)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(alignment: .topLeading) {
+                        if series.isMovie {
+                            Label("Film", systemImage: "film")
+                                .labelStyle(.iconOnly)
+                                .padding(6)
+                                .background(.black.opacity(0.55), in: Circle())
+                                .foregroundStyle(.white)
+                                .padding(6)
+                        }
+                    }
                 Text(series.title).font(.callout).bold().lineLimit(1)
-                Text("\(series.seasons.count) stagion\(series.seasons.count == 1 ? "e" : "i") · \(series.episodeCount) ep.")
+                Text(cardSubtitle)
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
         .buttonStyle(.plain)
         .contextMenu {
-            Button("Aggiungi episodi…") { model.beginImport(into: series.id) }
+            if !series.isMovie {
+                Button("Aggiungi episodi…") { model.beginImport(into: series.id) }
+            }
+            Button(series.isMovie ? "Converti in serie tv" : "Converti in film") {
+                model.toggleKind(series.id)
+            }
             Button("Rimuovi dalla libreria", role: .destructive) { model.deleteSeries(series.id) }
         }
+    }
+
+    private var cardSubtitle: String {
+        if series.isMovie {
+            let d = series.firstEpisode?.duration ?? 0
+            return d > 0 ? "Film · \(formatTime(d))" : "Film"
+        }
+        return "\(series.seasons.count) stagion\(series.seasons.count == 1 ? "e" : "i") · \(series.episodeCount) ep."
     }
 }
 
@@ -404,6 +459,14 @@ struct SeriesDetail: View {
     }
 
     var body: some View {
+        if series.isMovie {
+            MovieDetail(series: series)
+        } else {
+            seriesBody
+        }
+    }
+
+    private var seriesBody: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 HStack(alignment: .top, spacing: 18) {
@@ -489,6 +552,127 @@ struct SeriesDetail: View {
                     }
                     .background(Color(nsColor: .controlBackgroundColor),
                                 in: RoundedRectangle(cornerRadius: 10))
+                }
+            }
+            .padding(28)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .navigationTitle(series.title)
+    }
+}
+
+// MARK: - Vista dedicata al film
+
+/// Dettaglio del film: niente stagioni, niente lista episodi. L'anteprima è
+/// grande, il tasto Riproduci è dominante, sotto ci sono le informazioni
+/// utili (durata, stato, formato).
+struct MovieDetail: View {
+    @EnvironmentObject var model: AppModel
+    let series: Series
+
+    private var episode: Episode? { series.seasons.first?.episodes.first }
+    private var ref: EpisodeRef? { episode.map { model.ref(for: $0) } }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                HStack(alignment: .top, spacing: 22) {
+                    Thumbnail(
+                        episodeID: episode?.id ?? series.id,
+                        ready: model.thumbReady.contains(episode?.id ?? series.id)
+                    )
+                    .equatable()
+                    .frame(width: 340, height: 191)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .overlay(alignment: .topLeading) {
+                        Label("Film", systemImage: "film")
+                            .font(.caption).bold()
+                            .padding(.horizontal, 8).padding(.vertical, 4)
+                            .background(.black.opacity(0.55), in: Capsule())
+                            .foregroundStyle(.white)
+                            .padding(10)
+                    }
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(series.title).font(.largeTitle).bold().lineLimit(2)
+
+                        if let ep = episode {
+                            HStack(spacing: 14) {
+                                if ep.duration > 0 {
+                                    Label(formatTime(ep.duration), systemImage: "clock")
+                                }
+                                if ep.finished {
+                                    Label("Visto", systemImage: "checkmark.seal.fill")
+                                        .foregroundStyle(.green)
+                                } else if ep.started {
+                                    Label("Restano \(formatTime(ep.remaining))",
+                                          systemImage: "arrow.uturn.forward")
+                                        .foregroundStyle(.tint)
+                                }
+                                if ep.missing {
+                                    Label("File mancante", systemImage: "exclamationmark.triangle")
+                                        .foregroundStyle(.orange)
+                                }
+                                if ep.needsConversion {
+                                    Label(".\(ep.url.pathExtension) da convertire",
+                                          systemImage: "wand.and.rays")
+                                        .foregroundStyle(.orange)
+                                }
+                            }
+                            .font(.callout).foregroundStyle(.secondary)
+
+                            HStack(spacing: 10) {
+                                Button {
+                                    if let r = ref { model.play(r) }
+                                } label: {
+                                    Label(ep.started ? "Riprendi" : "Riproduci",
+                                          systemImage: "play.fill")
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .controlSize(.large)
+                                .disabled(ep.missing)
+
+                                if ep.progress > 0 {
+                                    Button {
+                                        model.update(ep.id) {
+                                            $0.position = 0
+                                            $0.finished = false
+                                        }
+                                    } label: {
+                                        Label("Ricomincia", systemImage: "backward.end")
+                                    }
+                                    .controlSize(.large)
+                                }
+                            }
+
+                            if ep.progress > 0 {
+                                ProgressView(value: ep.progress).frame(maxWidth: 340)
+                            }
+                        }
+                        Spacer()
+                    }
+                    Spacer()
+                }
+
+                if let ep = episode {
+                    HStack {
+                        Button {
+                            NSWorkspace.shared.activateFileViewerSelecting([ep.url])
+                        } label: {
+                            Label("Mostra nel Finder", systemImage: "folder")
+                        }
+                        Button(ep.finished ? "Segna come da vedere" : "Segna come visto") {
+                            model.update(ep.id) {
+                                $0.finished.toggle()
+                                $0.position = $0.finished ? $0.duration : 0
+                                $0.lastWatched = Date()
+                            }
+                        }
+                        Spacer()
+                        Button("Rimuovi dalla libreria", role: .destructive) {
+                            model.deleteSeries(series.id)
+                        }
+                    }
                 }
             }
             .padding(28)

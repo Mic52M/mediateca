@@ -40,14 +40,23 @@ struct Season: Codable, Identifiable, Hashable {
     var label: String { name.isEmpty ? "Stagione \(number)" : name }
 }
 
+enum MediaKind: String, Codable {
+    case series
+    case movie
+}
+
 struct Series: Codable, Identifiable, Hashable {
     var id: UUID = UUID()
     var title: String
     var seasons: [Season] = []
     var added: Date = Date()
+    /// Le biblioteche precedenti non hanno questo campo: il default lo tratta
+    /// come serie tv, che è ciò che era prima dell'introduzione dei film.
+    var kind: MediaKind = .series
 
     var episodeCount: Int { seasons.reduce(0) { $0 + $1.episodes.count } }
     var firstEpisode: Episode? { seasons.first(where: { !$0.episodes.isEmpty })?.episodes.first }
+    var isMovie: Bool { kind == .movie }
 }
 
 struct LibraryData: Codable {
@@ -198,8 +207,15 @@ enum Media {
         guard let ffprobe = await Converter.ffprobe else { return 0 }
         let p = Process()
         p.executableURL = URL(fileURLWithPath: ffprobe)
-        p.arguments = ["-v", "error", "-show_entries", "format=duration",
-                       "-of", "default=noprint_wrappers=1:nokey=1", url.path]
+        var args = ["-v", "error"]
+        // Come per Converter: alcuni .ts non hanno il byte di sync in testa,
+        // forzare il demuxer li fa aprire correttamente.
+        if url.pathExtension.lowercased() == "ts" {
+            args += ["-f", "mpegts"]
+        }
+        args += ["-show_entries", "format=duration",
+                 "-of", "default=noprint_wrappers=1:nokey=1", url.path]
+        p.arguments = args
         let out = Pipe()
         p.standardOutput = out
         p.standardError = Pipe()
