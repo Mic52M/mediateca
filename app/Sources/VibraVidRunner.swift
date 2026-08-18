@@ -366,16 +366,38 @@ final class VibraVidRunner: ObservableObject {
 
     // MARK: - Rilevamento file scaricati
 
+    /// Include solo i file "finali" di VibraVid, non i segmenti temporanei che
+    /// scrive durante lo streaming HLS/DASH: quelli stanno in cartelle
+    /// `*_hls_temp` / `*_dash_temp` o hanno nomi tipo `seg_00001.ts`.
     private func enumerateCurrentFiles() -> Set<String> {
         var out: Set<String> = []
         let root = bridge.downloadRoot
         guard let en = FileManager.default.enumerator(at: root,
                 includingPropertiesForKeys: [.isRegularFileKey],
                 options: [.skipsHiddenFiles]) else { return out }
-        for case let url as URL in en where VideoTypes.isVideo(url) {
+        for case let url as URL in en
+            where VideoTypes.isVideo(url) && !Self.isTemporaryDownloadArtifact(url) {
             out.insert(url.path)
         }
         return out
+    }
+
+    /// Riconosce i file intermedi che non devono mai entrare in libreria.
+    nonisolated static func isTemporaryDownloadArtifact(_ url: URL) -> Bool {
+        let path = url.path.lowercased()
+        // Cartelle temporanee di VibraVid: contengono la parola chiave nel path
+        // (es. "Coulda Shoulda S03E01_hls_temp/v_1920x1080/seg_00001.ts").
+        if path.contains("_hls_temp") || path.contains("_dash_temp")
+            || path.contains(".tmp/") || path.contains("/tmp/") {
+            return true
+        }
+        // Nomi di segmento: chunk-…, seg_00000, init.mp4 di un manifest.
+        let name = url.lastPathComponent.lowercased()
+        if name.hasPrefix("seg_") || name.hasPrefix("segment") || name.hasPrefix("chunk-")
+            || name == "init.mp4" || name == "init.m4s" || name.hasSuffix(".m4s") {
+            return true
+        }
+        return false
     }
 
     private func startWatcher() {
@@ -410,12 +432,16 @@ final class VibraVidRunner: ObservableObject {
         let fresh = current.subtracting(snapshot)
         guard !fresh.isEmpty else { return }
         for path in fresh {
+            let url = URL(fileURLWithPath: path)
+            // Doppia difesa: enumerateCurrentFiles già li filtra, ma se il
+            // watcher restituisce percorsi al volo li controlliamo qui.
+            guard !Self.isTemporaryDownloadArtifact(url) else {
+                snapshot.insert(path)
+                continue
+            }
             let attrs = (try? FileManager.default.attributesOfItem(atPath: path)) ?? [:]
             let size = (attrs[.size] as? Int) ?? 0
-            // Cartelle temporanee di ffmpeg producono a volte spezzoni piccoli:
-            // il taglio scarta i frammenti e considera solo file completi.
             guard size > 200_000 else { continue }
-            let url = URL(fileURLWithPath: path)
             snapshot.insert(path)
             if !downloadedFiles.contains(url) {
                 downloadedFiles.append(url)

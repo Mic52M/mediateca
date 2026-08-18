@@ -16,6 +16,28 @@ final class AppModel: ObservableObject {
     /// solo la card interessata si ridisegna, invece dell'intera libreria.
     @Published var thumbReady: Set<UUID> = []
     @Published var alert: String?
+    /// Serie/film per cui è stata richiesta la rimozione dalla libreria: la
+    /// UI mostra un alert di conferma prima di eseguire davvero deleteSeries.
+    @Published var pendingRemoval: PendingRemoval?
+
+    struct PendingRemoval: Identifiable, Equatable {
+        var id: UUID
+        var title: String
+        var isMovie: Bool
+    }
+
+    func requestRemoveSeries(_ id: UUID) {
+        guard let s = data.series.first(where: { $0.id == id }) else { return }
+        pendingRemoval = PendingRemoval(id: id, title: s.title, isMovie: s.isMovie)
+    }
+
+    func confirmPendingRemoval() {
+        guard let p = pendingRemoval else { return }
+        pendingRemoval = nil
+        deleteSeries(p.id)
+    }
+
+    func cancelPendingRemoval() { pendingRemoval = nil }
     /// Visibilità della barra sopra il video. Vive qui e non nella vista perché
     /// anche la finestra (semaforo, titolo) deve seguirla da un'unica sorgente.
     @Published var chromeVisible = true

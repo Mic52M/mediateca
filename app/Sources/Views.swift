@@ -51,6 +51,21 @@ struct ContentView: View {
         } message: {
             Text(alertText ?? "")
         }
+        .alert(removalTitle, isPresented: Binding(
+            get: { model.pendingRemoval != nil },
+            set: { if !$0 { model.cancelPendingRemoval() } }
+        )) {
+            Button("Rimuovi", role: .destructive) { model.confirmPendingRemoval() }
+            Button("Annulla", role: .cancel) { model.cancelPendingRemoval() }
+        } message: {
+            Text("La voce “\(model.pendingRemoval?.title ?? "")” verrà tolta dalla libreria. "
+               + "I file su disco non vengono toccati.")
+        }
+    }
+
+    private var removalTitle: String {
+        guard let p = model.pendingRemoval else { return "Rimuovere?" }
+        return p.isMovie ? "Rimuovere il film?" : "Rimuovere la serie?"
     }
 }
 
@@ -152,7 +167,7 @@ struct LibraryScreen: View {
             }
             Divider()
             Button("Rimuovi dalla libreria", role: .destructive) {
-                model.deleteSeries(s.id)
+                model.requestRemoveSeries(s.id)
             }
         }
     }
@@ -424,7 +439,7 @@ struct SeriesCard: View {
             Button(series.isMovie ? "Converti in serie tv" : "Converti in film") {
                 model.toggleKind(series.id)
             }
-            Button("Rimuovi dalla libreria", role: .destructive) { model.deleteSeries(series.id) }
+            Button("Rimuovi dalla libreria", role: .destructive) { model.requestRemoveSeries(series.id) }
         }
     }
 
@@ -670,7 +685,7 @@ struct MovieDetail: View {
                         }
                         Spacer()
                         Button("Rimuovi dalla libreria", role: .destructive) {
-                            model.deleteSeries(series.id)
+                            model.requestRemoveSeries(series.id)
                         }
                     }
                 }
