@@ -20,6 +20,15 @@ final class VibraVidRunner: ObservableObject {
     @Published private(set) var currentCommand: [String] = []
     @Published private(set) var downloadedFiles: [URL] = []
 
+    /// Destinazione scelta prima di avviare il download: se impostata, i file
+    /// che arrivano finiscono lì invece che nella serie dedotta dal path.
+    var pendingTarget: DownloadTarget?
+
+    enum DownloadTarget: Equatable {
+        case newSeries(title: String, season: Int)
+        case appendTo(seriesID: UUID, season: Int)
+    }
+
     /// Domanda che VibraVid sta ponendo in questo momento (nil = nessuna).
     /// Viene ricalcolata a ogni chunk di output; la UI ci si aggancia per
     /// mostrare un pannello di risposta invece del solo testo grezzo.
@@ -60,6 +69,14 @@ final class VibraVidRunner: ObservableObject {
     /// interpretarlo come prompt: rich stampa il prompt e non manda a capo.
     private static let promptQuietMillis: UInt64 = 350
     private var promptTask: Task<Void, Never>?
+
+    /// Il log completo cresce dentro `logBuffer` e viene ribaltato in `log`
+    /// (osservato dalla UI) al massimo `logFlushHz` volte al secondo: senza
+    /// questo, l'output di VibraVid a raffica manda in stallo il main thread.
+    private var logBuffer: String = ""
+    private var flushScheduled = false
+    private static let logMaxChars = 60_000
+    private static let logFlushMillis: UInt64 = 120
 
     init(bridge: VibraVidBridge) {
         self.bridge = bridge
@@ -117,7 +134,7 @@ final class VibraVidRunner: ObservableObject {
         phase = .cancelled
     }
 
-    func clearLog() { log = "" }
+    func clearLog() { log = ""; logBuffer = "" }
 
     /// Invia una riga di testo allo stdin del processo Python. Serve a
     /// rispondere ai prompt interattivi di VibraVid (scelta episodio, scelta
@@ -215,12 +232,30 @@ final class VibraVidRunner: ObservableObject {
     }
 
     private func append(_ text: String) {
-        log += text
-        // Evita che il log cresca all'infinito nelle sessioni lunghe.
-        if log.count > 240_000 {
-            log = String(log.suffix(160_000))
+        logBuffer += text
+        // Limita a un tail: la UI mostra solo le ultime righe utili, altrimenti
+        // rendere 300k caratteri di Text blocca il main thread.
+        if logBuffer.count > Self.logMaxChars {
+            logBuffer = String(logBuffer.suffix(Self.logMaxChars))
         }
+        scheduleFlush()
         scheduleprompt()
+    }
+
+    /// Ribalta il buffer sulla property osservata dalla vista al massimo ogni
+    /// `logFlushMillis`. Un flush finale scatta a inizio pausa, così l'ultima
+    /// riga non resta indietro.
+    private func scheduleFlush() {
+        guard !flushScheduled else { return }
+        flushScheduled = true
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: Self.logFlushMillis * 1_000_000)
+            await MainActor.run {
+                guard let self else { return }
+                self.flushScheduled = false
+                if self.log != self.logBuffer { self.log = self.logBuffer }
+            }
+        }
     }
 
     /// Debounce: ogni volta che arriva output nuovo si azzera l'attesa. Se
@@ -237,11 +272,17 @@ final class VibraVidRunner: ObservableObject {
 
     private func detectPrompt() {
         guard isRunning else { pendingPrompt = nil; return }
-        guard let question = Self.trailingPrompt(in: log) else {
+        // Analizziamo solo le ultime 8k caratteri: le tabelle e i prompt sono
+        // sempre alla fine, e su questo taglio il parser scala anche con log
+        // molto lunghi.
+        let tail = logBuffer.count > 8_000
+            ? String(logBuffer.suffix(8_000))
+            : logBuffer
+        guard let question = Self.trailingPrompt(in: tail) else {
             pendingPrompt = nil
             return
         }
-        let table = Self.parseTable(in: log)
+        let table = Self.parseTable(in: tail)
         let quick = Self.quickReplies(for: question)
         let new = PendingPrompt(question: question, table: table, quickReplies: quick)
         if new != pendingPrompt { pendingPrompt = new }

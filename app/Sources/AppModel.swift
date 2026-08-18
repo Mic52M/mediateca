@@ -29,7 +29,9 @@ final class AppModel: ObservableObject {
     let vibravid = VibraVidBridge()
     lazy var runner: VibraVidRunner = {
         let r = VibraVidRunner(bridge: vibravid)
-        r.onNewFile = { [weak self] url in self?.absorbDownloaded(url) }
+        r.onNewFile = { [weak self, weak r] url in
+            self?.absorbDownloaded(url, target: r?.pendingTarget)
+        }
         return r
     }()
 
@@ -473,30 +475,70 @@ final class AppModel: ObservableObject {
 
     // MARK: - Import dei file scaricati da VibraVid
 
-    /// Cattura un nuovo file scaricato: se il nome contiene "SxxExx" prova a
-    /// aggregarlo alla serie/stagione dedotta dal path, altrimenti finisce fra
-    /// i video singoli. Nessun file viene copiato: si conserva solo il percorso.
-    func absorbDownloaded(_ url: URL) {
+    /// Cattura un nuovo file scaricato. Se il chiamante fornisce un `target`
+    /// (l'utente ha scelto "nuova serie X" o "accoda a Y" nel pannello
+    /// Scarica), quello vince su qualunque euristica sul path.
+    func absorbDownloaded(_ url: URL, target: VibraVidRunner.DownloadTarget? = nil) {
         let parsed = NameParser.parse(url)
-        // Path tipico di VibraVid: .../Serie/<NomeSerie>/Sxx/<file>
-        let seriesTitle = url.deletingLastPathComponent().deletingLastPathComponent()
-            .lastPathComponent
-            .replacingOccurrences(of: "_", with: " ")
-
         let ep = Episode(
             path: url.path,
             title: parsed.title,
-            number: parsed.episode ?? 1
+            number: parsed.episode ?? nextEpisodeNumber(for: target) ?? 1
         )
 
-        if let season = parsed.season, !seriesTitle.isEmpty, seriesTitle != "." {
-            attach(ep, toSeries: seriesTitle, season: season)
-        } else {
-            data.loose.append(ep)
+        switch target {
+        case .newSeries(let title, let season):
+            attach(ep, toSeries: title, season: season)
+        case .appendTo(let seriesID, let season):
+            if let idx = data.series.firstIndex(where: { $0.id == seriesID }) {
+                attachTo(seriesIndex: idx, season: season, ep: ep)
+            } else {
+                // La serie è stata cancellata a job in corso: fallback nuovo.
+                attach(ep, toSeries: parsed.title, season: parsed.season ?? 1)
+            }
+        case .none:
+            // Path tipico di VibraVid: .../Serie/<NomeSerie>/Sxx/<file>
+            let seriesTitle = url.deletingLastPathComponent().deletingLastPathComponent()
+                .lastPathComponent
+                .replacingOccurrences(of: "_", with: " ")
+            if let season = parsed.season, !seriesTitle.isEmpty, seriesTitle != "." {
+                attach(ep, toSeries: seriesTitle, season: season)
+            } else {
+                data.loose.append(ep)
+            }
         }
         save()
         Task { await refreshMetadata() }
         if ep.needsConversion { convert(ep) }
+    }
+
+    /// Cerca il prossimo numero episodio libero nella serie/stagione di
+    /// destinazione, per evitare due "1" quando il nome file non contiene S00E00.
+    private func nextEpisodeNumber(for target: VibraVidRunner.DownloadTarget?) -> Int? {
+        guard let target else { return nil }
+        let sIdx: Int?
+        let seasonNum: Int
+        switch target {
+        case .newSeries(let title, let season):
+            sIdx = data.series.firstIndex { $0.title.caseInsensitiveCompare(title) == .orderedSame }
+            seasonNum = season
+        case .appendTo(let id, let season):
+            sIdx = data.series.firstIndex { $0.id == id }
+            seasonNum = season
+        }
+        guard let sIdx,
+              let seaIdx = data.series[sIdx].seasons.firstIndex(where: { $0.number == seasonNum })
+        else { return 1 }
+        return (data.series[sIdx].seasons[seaIdx].episodes.map(\.number).max() ?? 0) + 1
+    }
+
+    private func attachTo(seriesIndex sIdx: Int, season: Int, ep: Episode) {
+        if let seaIdx = data.series[sIdx].seasons.firstIndex(where: { $0.number == season }) {
+            data.series[sIdx].seasons[seaIdx].episodes.append(ep)
+        } else {
+            data.series[sIdx].seasons.append(Season(number: season, episodes: [ep]))
+            data.series[sIdx].seasons.sort { $0.number < $1.number }
+        }
     }
 
     private func attach(_ ep: Episode, toSeries title: String, season: Int) {

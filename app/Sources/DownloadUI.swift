@@ -121,25 +121,84 @@ struct DownloadScreen: View {
             }
             .padding(.horizontal, 24).padding(.top, 10).padding(.bottom, 6)
 
-            ScrollViewReader { proxy in
-                ScrollView {
-                    Text(runner.log.isEmpty ? "In attesa di comandi…" : runner.log)
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundStyle(runner.log.isEmpty ? .secondary : .primary)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(14)
-                        .id("bottom")
-                }
-                .background(Color(nsColor: .textBackgroundColor))
-                .onChange(of: runner.log) { _, _ in
-                    withAnimation(.linear(duration: 0.1)) {
-                        proxy.scrollTo("bottom", anchor: .bottom)
-                    }
-                }
-            }
+            LogConsoleView(
+                text: runner.log.isEmpty ? "In attesa di comandi…" : runner.log,
+                dimmed: runner.log.isEmpty
+            )
+            .frame(maxHeight: .infinity)
         }
         .frame(maxHeight: .infinity)
+    }
+}
+
+// MARK: - Console veloce basata su NSTextView
+
+/// SwiftUI `Text` rirenderizza tutta la stringa a ogni aggiornamento: con log
+/// da decine di migliaia di caratteri manda in stallo il main thread. Un
+/// NSTextView riusa il proprio layout manager ed è progettato apposta per
+/// output di questo tipo.
+private struct LogConsoleView: NSViewRepresentable {
+    let text: String
+    let dimmed: Bool
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scroll = NSTextView.scrollableTextView()
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.borderType = .noBorder
+        scroll.drawsBackground = false
+
+        guard let text = scroll.documentView as? NSTextView else { return scroll }
+        text.isEditable = false
+        text.isRichText = false
+        text.usesFontPanel = false
+        text.drawsBackground = true
+        text.backgroundColor = NSColor.textBackgroundColor
+        text.textContainerInset = NSSize(width: 14, height: 12)
+        text.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+        text.textContainer?.widthTracksTextView = true
+        text.textContainer?.lineFragmentPadding = 0
+        text.isAutomaticQuoteSubstitutionEnabled = false
+        text.isAutomaticDashSubstitutionEnabled = false
+        text.isAutomaticSpellingCorrectionEnabled = false
+        return scroll
+    }
+
+    func updateNSView(_ scroll: NSScrollView, context: Context) {
+        guard let view = scroll.documentView as? NSTextView,
+              let storage = view.textStorage else { return }
+        let color: NSColor = dimmed ? .secondaryLabelColor : .labelColor
+        let current = storage.string
+
+        guard current != text else {
+            if view.textColor != color { view.textColor = color }
+            return
+        }
+
+        let stickToBottom: Bool = {
+            guard let clip = scroll.contentView as NSClipView? else { return true }
+            return (clip.documentVisibleRect.maxY + 40) >= view.frame.height
+        }()
+
+        let font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+        let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
+
+        // Se il testo nuovo è un'estensione del precedente (caso comune con
+        // log che cresce), appendiamo solo la differenza — molto più veloce
+        // di riassegnare l'intera stringa a ogni tick.
+        if text.hasPrefix(current) {
+            let appended = String(text.dropFirst(current.count))
+            if !appended.isEmpty {
+                storage.append(NSAttributedString(string: appended, attributes: attrs))
+            }
+        } else {
+            storage.setAttributedString(NSAttributedString(string: text, attributes: attrs))
+        }
+        view.textColor = color
+
+        if stickToBottom {
+            view.scrollToEndOfDocument(nil)
+        }
     }
 }
 
@@ -149,11 +208,13 @@ private struct SearchForm: View {
     @ObservedObject var runner: VibraVidRunner
     @ObservedObject var bridge: VibraVidBridge
 
+    @EnvironmentObject var model: AppModel
     @State private var query: String = ""
     @State private var providerID: Int = 0
     @State private var useGlobal = false
     @State private var category: Int = 0     // 0 = tutte
     @State private var trackPreset: String = ""
+    @State private var target = DestinationChoice()
 
     // I preset accettati dalla CLI --tracks.
     private let presets: [(key: String, label: String)] = [
@@ -213,6 +274,8 @@ private struct SearchForm: View {
                 .frame(width: 300)
             }
 
+            DestinationPicker(choice: $target, suggestedTitle: query, allSeries: model.data.series)
+
             HStack {
                 Button {
                     start()
@@ -242,6 +305,7 @@ private struct SearchForm: View {
     private func start() {
         let q = query.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else { return }
+        runner.pendingTarget = target.resolve(suggestedTitle: q)
         if useGlobal {
             runner.globalSearch(query: q, category: category == 0 ? nil : category)
         } else {
@@ -256,6 +320,7 @@ private struct SearchForm: View {
 // MARK: - URL diretto
 
 private struct DirectURLForm: View {
+    @EnvironmentObject var model: AppModel
     @ObservedObject var runner: VibraVidRunner
 
     @State private var url = ""
@@ -265,6 +330,7 @@ private struct DirectURLForm: View {
     @State private var licenseHeaderText = ""
     @State private var keyText = ""
     @State private var drm = "auto"
+    @State private var target = DestinationChoice()
 
     private let drmOptions = ["auto", "widevine", "playready"]
 
@@ -284,6 +350,10 @@ private struct DirectURLForm: View {
                     .frame(height: 66)
                     .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.separator))
             }
+
+            DestinationPicker(choice: $target,
+                              suggestedTitle: suggestedTitle,
+                              allSeries: model.data.series)
 
             DisclosureGroup("Opzioni DRM") {
                 VStack(alignment: .leading, spacing: 12) {
@@ -340,9 +410,18 @@ private struct DirectURLForm: View {
         }
     }
 
+    /// Nome che compare come default nel selettore serie: quello dell'output
+    /// se l'utente l'ha impostato, altrimenti l'ultimo pezzo dell'URL.
+    private var suggestedTitle: String {
+        if !output.isEmpty { return (output as NSString).lastPathComponent }
+        return (url.split(separator: "/").last.map(String.init) ?? "")
+            .split(separator: "?").first.map(String.init) ?? ""
+    }
+
     private func start() {
         let u = url.trimmingCharacters(in: .whitespaces)
         guard !u.isEmpty else { return }
+        runner.pendingTarget = target.resolve(suggestedTitle: suggestedTitle)
         runner.directDownload(
             url: u,
             output: output.trimmingCharacters(in: .whitespaces),
@@ -357,6 +436,146 @@ private struct DirectURLForm: View {
         s.split(whereSeparator: \.isNewline)
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
+    }
+}
+
+// MARK: - Scelta destinazione
+
+/// Stato editabile del pannello destinazione. Vive fuori dal picker così può
+/// sopravvivere ai suoi re-render e essere passato al runner al momento
+/// dell'avvio.
+struct DestinationChoice: Equatable {
+    enum Mode: String, CaseIterable { case newSeries, appendTo }
+    var mode: Mode = .newSeries
+    var newTitle: String = ""
+    var appendSeriesID: UUID?
+    var season: Int = 1
+
+    /// Trasforma le scelte in un `DownloadTarget` concreto per il runner. Se
+    /// il nome della nuova serie è vuoto, si usa il titolo suggerito (query).
+    func resolve(suggestedTitle: String) -> VibraVidRunner.DownloadTarget {
+        switch mode {
+        case .newSeries:
+            let title = newTitle.trimmingCharacters(in: .whitespaces).isEmpty
+                ? suggestedTitle.trimmingCharacters(in: .whitespaces)
+                : newTitle.trimmingCharacters(in: .whitespaces)
+            return .newSeries(title: title.isEmpty ? "Senza titolo" : title,
+                              season: max(1, season))
+        case .appendTo:
+            if let id = appendSeriesID {
+                return .appendTo(seriesID: id, season: max(1, season))
+            }
+            // Nessuna serie scelta ma modalità "accoda": fallback a nuova.
+            return .newSeries(title: suggestedTitle.isEmpty ? "Senza titolo" : suggestedTitle,
+                              season: max(1, season))
+        }
+    }
+}
+
+private struct DestinationPicker: View {
+    @Binding var choice: DestinationChoice
+    let suggestedTitle: String
+    let allSeries: [Series]
+
+    /// L'utente non ha ancora toccato il campo nome: lo teniamo agganciato
+    /// alla query così mentre digita "steins gate" il nome propone lo stesso.
+    @State private var nameFollowsSuggestion = true
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "folder.fill.badge.plus").foregroundStyle(.tint)
+                Text("Dove salvare").font(.callout).bold()
+            }
+
+            Picker("", selection: $choice.mode) {
+                Text("Nuova serie").tag(DestinationChoice.Mode.newSeries)
+                Text("Accoda a serie esistente").tag(DestinationChoice.Mode.appendTo)
+                    .disabled(allSeries.isEmpty)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(maxWidth: 420)
+
+            HStack(spacing: 10) {
+                switch choice.mode {
+                case .newSeries:
+                    TextField("Nome della nuova serie",
+                              text: Binding(
+                                get: {
+                                    if nameFollowsSuggestion && choice.newTitle.isEmpty {
+                                        return suggestedTitle
+                                    }
+                                    return choice.newTitle
+                                },
+                                set: { new in
+                                    nameFollowsSuggestion = false
+                                    choice.newTitle = new
+                                }
+                              ))
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 340)
+                case .appendTo:
+                    Picker("", selection: Binding(
+                        get: { choice.appendSeriesID ?? allSeries.first?.id ?? UUID() },
+                        set: { choice.appendSeriesID = $0 }
+                    )) {
+                        ForEach(allSeries) { s in
+                            Text("\(s.title)  ·  \(s.episodeCount) ep.").tag(s.id)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 340)
+                }
+
+                HStack(spacing: 6) {
+                    Text("Stagione").foregroundStyle(.secondary).font(.callout)
+                    Stepper(value: $choice.season, in: 1...99) {
+                        Text("\(choice.season)").monospacedDigit().frame(width: 24, alignment: .leading)
+                    }
+                    .frame(width: 130)
+                }
+            }
+
+            if choice.mode == .appendTo,
+               let sid = choice.appendSeriesID ?? allSeries.first?.id,
+               let s = allSeries.first(where: { $0.id == sid }) {
+                Text(existingSeasonHint(for: s))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .padding(12)
+        .background(Color(nsColor: .controlBackgroundColor),
+                    in: RoundedRectangle(cornerRadius: 8))
+        .onAppear {
+            // Se ci sono serie e non è stato scelto nulla, preseleziona la prima
+            // per l'accoda: lo Stepper della stagione parte dalla prossima libera.
+            if choice.appendSeriesID == nil, let first = allSeries.first {
+                choice.appendSeriesID = first.id
+            }
+        }
+        .onChange(of: choice.appendSeriesID) { _, _ in syncSeasonToTarget() }
+        .onChange(of: choice.mode) { _, _ in syncSeasonToTarget() }
+    }
+
+    /// Quando l'utente sceglie "accoda", proponiamo per default la stagione
+    /// successiva a quella più alta già presente — è il caso comune.
+    private func syncSeasonToTarget() {
+        guard choice.mode == .appendTo,
+              let sid = choice.appendSeriesID,
+              let s = allSeries.first(where: { $0.id == sid })
+        else { return }
+        let maxSeason = s.seasons.map(\.number).max() ?? 0
+        choice.season = maxSeason + 1
+    }
+
+    private func existingSeasonHint(for s: Series) -> String {
+        let numbers = s.seasons.map(\.number).sorted()
+        if numbers.contains(choice.season) {
+            let ep = s.seasons.first { $0.number == choice.season }?.episodes.count ?? 0
+            return "La stagione \(choice.season) esiste già con \(ep) episodi. I nuovi verranno accodati."
+        }
+        return "Verrà creata la stagione \(choice.season) in “\(s.title)”."
     }
 }
 
