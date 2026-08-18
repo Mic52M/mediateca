@@ -46,6 +46,11 @@ struct DownloadScreen: View {
                 .padding(24)
 
                 Divider()
+                if let prompt = runner.pendingPrompt {
+                    PromptPanel(prompt: prompt, runner: runner)
+                        .padding(.horizontal, 24).padding(.top, 12)
+                    Divider().padding(.top, 12)
+                }
                 logConsole
             }
         }
@@ -148,8 +153,6 @@ private struct SearchForm: View {
     @State private var providerID: Int = 0
     @State private var useGlobal = false
     @State private var category: Int = 0     // 0 = tutte
-    @State private var season: String = ""
-    @State private var episode: String = ""
     @State private var trackPreset: String = ""
 
     // I preset accettati dalla CLI --tracks.
@@ -204,37 +207,24 @@ private struct SearchForm: View {
                     .frame(width: 340)
                 }
 
-                if !useGlobal {
-                    TextField("Stagione (es. 1  o  1-3  o  *)", text: $season)
-                        .textFieldStyle(.roundedBorder).frame(width: 200)
-                    TextField("Episodio (es. 1  o  1-5  o  *)", text: $episode)
-                        .textFieldStyle(.roundedBorder).frame(width: 200)
-                }
-            }
-
-            HStack {
                 Picker("Tracce", selection: $trackPreset) {
                     ForEach(presets, id: \.key) { p in Text(p.label).tag(p.key) }
                 }
-                .frame(width: 340)
-                Spacer()
+                .frame(width: 300)
             }
 
             HStack {
                 Button {
                     start()
                 } label: {
-                    Label(useGlobal ? "Avvia ricerca" : "Scarica il primo risultato",
-                          systemImage: "arrow.down.circle.fill")
+                    Label("Avvia ricerca", systemImage: "magnifyingglass")
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
                 .disabled(query.trimmingCharacters(in: .whitespaces).isEmpty || runner.isRunning)
 
-                if !useGlobal {
-                    Text("Vengono usate le opzioni salvate in Impostazioni → Download.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
+                Text("Titolo, stagione ed episodi si scelgono sotto, appena VibraVid li chiede.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }
     }
@@ -258,8 +248,6 @@ private struct SearchForm: View {
             let name = bridge.providers.first { $0.index == providerID }?.name ?? "\(providerID)"
             runner.searchAndDownload(
                 query: q, siteName: name,
-                season: season.isEmpty ? nil : season,
-                episode: episode.isEmpty ? nil : episode,
                 trackPresetKey: trackPreset.isEmpty ? nil : trackPreset)
         }
     }
@@ -369,5 +357,115 @@ private struct DirectURLForm: View {
         s.split(whereSeparator: \.isNewline)
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
+    }
+}
+
+// MARK: - Prompt interattivo
+
+/// Pannello che compare quando VibraVid attende input. Mostra la domanda,
+/// eventuali risultati in forma di lista cliccabile, un campo di risposta e
+/// bottoni rapidi.
+private struct PromptPanel: View {
+    let prompt: VibraVidRunner.PendingPrompt
+    @ObservedObject var runner: VibraVidRunner
+    @State private var reply: String = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "questionmark.bubble.fill").foregroundStyle(.tint)
+                Text("VibraVid chiede").font(.callout).bold()
+                Spacer()
+            }
+            Text(prompt.question)
+                .font(.callout)
+                .foregroundStyle(.primary)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            if let table = prompt.table {
+                tableView(table)
+            }
+
+            HStack(spacing: 8) {
+                TextField("Rispondi (Invio per confermare)", text: $reply)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($focused)
+                    .onSubmit { sendReply() }
+
+                Button("Invia") { sendReply() }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(reply.trimmingCharacters(in: .whitespaces).isEmpty)
+
+                ForEach(prompt.quickReplies, id: \.self) { hint in
+                    Button(hint) {
+                        runner.send(hint == "Invio" ? "" : hint)
+                        reply = ""
+                    }
+                    .controlSize(.small)
+                }
+            }
+        }
+        .padding(14)
+        .background(.tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.tint.opacity(0.35)))
+        .onAppear { focused = true }
+    }
+
+    private func sendReply() {
+        let text = reply.trimmingCharacters(in: .whitespaces)
+        runner.send(text)
+        reply = ""
+    }
+
+    @ViewBuilder
+    private func tableView(_ table: VibraVidRunner.PromptTable) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            // Intestazione
+            HStack(alignment: .top) {
+                ForEach(Array(table.headers.enumerated()), id: \.offset) { _, h in
+                    Text(h.uppercased())
+                        .font(.caption2).bold()
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .padding(.horizontal, 10).padding(.vertical, 4)
+
+            ScrollView(.vertical, showsIndicators: true) {
+                VStack(spacing: 0) {
+                    ForEach(Array(table.rows.enumerated()), id: \.offset) { rowIndex, row in
+                        Button {
+                            if let col = table.indexColumn, col < row.count {
+                                runner.send(row[col])
+                            } else if !row.isEmpty {
+                                // Fallback: la prima colonna è quasi sempre l'indice.
+                                runner.send(row[0])
+                            }
+                        } label: {
+                            HStack(alignment: .top) {
+                                ForEach(Array(row.enumerated()), id: \.offset) { _, cell in
+                                    Text(cell)
+                                        .font(.system(size: 12))
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .lineLimit(2)
+                                }
+                            }
+                            .padding(.horizontal, 10).padding(.vertical, 6)
+                            .background(rowIndex.isMultiple(of: 2)
+                                        ? Color.clear
+                                        : Color.primary.opacity(0.04))
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help("Clic per inviare “\(row.first ?? "")” come risposta")
+                    }
+                }
+            }
+            .frame(maxHeight: 260)
+            .background(Color(nsColor: .textBackgroundColor),
+                        in: RoundedRectangle(cornerRadius: 6))
+        }
     }
 }
