@@ -196,7 +196,8 @@ struct HomeScreen: View {
                             LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: 16)],
                                       alignment: .leading, spacing: 20) {
                                 ForEach(model.data.loose) { ep in
-                                    ContinueCard(ref: model.ref(for: ep))
+                                    ContinueCard(ref: model.ref(for: ep),
+                                                 showRemoveControl: false)
                                 }
                             }
                         }
@@ -260,6 +261,11 @@ struct Thumbnail: View, Equatable {
 struct ContinueCard: View {
     @EnvironmentObject var model: AppModel
     let ref: EpisodeRef
+    @State private var hovering = false
+
+    /// Se lo mostriamo, la card è nella riga "Continua a guardare" — c'è quindi
+    /// senso proporre un modo rapido per toglierla da lì.
+    var showRemoveControl: Bool = true
 
     var body: some View {
         Button {
@@ -292,6 +298,11 @@ struct ContinueCard: View {
                             .background(.black.opacity(0.6), in: Circle())
                             .foregroundStyle(.orange)
                             .padding(6)
+                    } else if showRemoveControl && ref.episode.started {
+                        removeButton
+                            .padding(6)
+                            .opacity(hovering ? 1 : 0)
+                            .animation(.easeInOut(duration: 0.15), value: hovering)
                     }
                 }
 
@@ -308,6 +319,39 @@ struct ContinueCard: View {
             }
         }
         .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .contextMenu {
+            Button("Riproduci") { model.play(ref) }
+            Divider()
+            if ref.episode.started {
+                Button("Rimuovi da “Continua a guardare”") {
+                    model.dismissFromContinueWatching(ref.episode.id)
+                }
+            }
+            Button(ref.episode.finished ? "Segna come da vedere" : "Segna come visto") {
+                model.update(ref.episode.id) {
+                    $0.finished.toggle()
+                    $0.position = $0.finished ? $0.duration : 0
+                    $0.lastWatched = Date()
+                }
+            }
+        }
+    }
+
+    /// Piccola X in overlay: preferisco un bottone dedicato al menu contestuale
+    /// perché è scopribile — chi guarda la riga vede subito che si può togliere.
+    private var removeButton: some View {
+        Button {
+            model.dismissFromContinueWatching(ref.episode.id)
+        } label: {
+            Image(systemName: "xmark")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 22, height: 22)
+                .background(.black.opacity(0.72), in: Circle())
+        }
+        .buttonStyle(.plain)
+        .help("Rimuovi da “Continua a guardare”")
     }
 }
 

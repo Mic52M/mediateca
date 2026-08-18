@@ -178,6 +178,16 @@ final class AppModel: ObservableObject {
         return nil
     }
 
+    /// Toglie un episodio dalla riga "Continua a guardare" senza segnarlo come
+    /// visto: azzera solo posizione e ultima visione. L'episodio resta nella
+    /// serie come "da iniziare".
+    func dismissFromContinueWatching(_ id: UUID) {
+        update(id) {
+            $0.position = 0
+            $0.lastWatched = nil
+        }
+    }
+
     // MARK: - Ordinamento e stagioni
 
     /// Posizione di un episodio: (indice serie, indice stagione, indice episodio).
