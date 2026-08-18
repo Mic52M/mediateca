@@ -65,6 +65,10 @@ struct LibraryScreen: View {
             List(selection: $model.selection) {
                 Label("Home", systemImage: "house")
                     .tag(AppModel.SidebarItem.home)
+                Label("Scarica", systemImage: "arrow.down.circle")
+                    .tag(AppModel.SidebarItem.download)
+                Label("Impostazioni", systemImage: "gearshape")
+                    .tag(AppModel.SidebarItem.settings)
 
                 Section("Le tue serie") {
                     ForEach(model.data.series) { s in
@@ -109,6 +113,10 @@ struct LibraryScreen: View {
                 } else {
                     HomeScreen()
                 }
+            case .download:
+                DownloadScreen(runner: model.runner, bridge: model.vibravid)
+            case .settings:
+                SettingsScreen(bridge: model.vibravid)
             default:
                 HomeScreen()
             }
