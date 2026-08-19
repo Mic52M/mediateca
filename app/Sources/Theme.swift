@@ -85,6 +85,45 @@ enum Theme {
     )
 }
 
+// MARK: - Stili di bottone
+
+/// Azione principale: pillola piena in accent con testo scuro. L'arancio è
+/// chiaro, quindi il nero dà molto più contrasto del bianco.
+struct PrimaryButtonStyle: ButtonStyle {
+    var compact = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(compact ? .callout.bold() : .headline)
+            .foregroundStyle(Color.black.opacity(0.88))
+            .padding(.horizontal, compact ? 16 : 22)
+            .padding(.vertical, compact ? 8 : 12)
+            .background(
+                Capsule().fill(Theme.accent.opacity(configuration.isPressed ? 0.75 : 1))
+            )
+            .contentShape(Capsule())
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
+/// Azione secondaria: contorno chiaro su fondo scuro.
+struct SecondaryButtonStyle: ButtonStyle {
+    var compact = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(compact ? .callout : .headline)
+            .foregroundStyle(Theme.text)
+            .padding(.horizontal, compact ? 16 : 22)
+            .padding(.vertical, compact ? 8 : 12)
+            .background(
+                Capsule().fill(Color.white.opacity(configuration.isPressed ? 0.16 : 0.08))
+            )
+            .overlay(Capsule().strokeBorder(Theme.borderStrong, lineWidth: 0.5))
+            .contentShape(Capsule())
+    }
+}
+
 // MARK: - Modificatori di comodo
 
 extension View {

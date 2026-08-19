@@ -35,6 +35,14 @@ final class VibraVidRunner: ObservableObject {
     /// mostrare un pannello di risposta invece del solo testo grezzo.
     @Published private(set) var pendingPrompt: PendingPrompt?
 
+    /// Riga di stato leggibile ricavata dall'output: serve a raccontare cosa
+    /// sta succedendo senza mostrare il terminale.
+    @Published private(set) var statusLine: String = ""
+
+    /// Percentuale 0…1 se l'output ne contiene una, altrimenti nil
+    /// (avanzamento indeterminato).
+    @Published private(set) var progress: Double?
+
     struct PendingPrompt: Equatable {
         var question: String
         var table: PromptTable?
@@ -167,6 +175,8 @@ final class VibraVidRunner: ObservableObject {
 
         downloadedFiles = []
         pendingPrompt = nil
+        statusLine = "Avvio…"
+        progress = nil
         snapshot = enumerateCurrentFiles()
         startWatcher()
 
@@ -255,8 +265,58 @@ final class VibraVidRunner: ObservableObject {
                 guard let self else { return }
                 self.flushScheduled = false
                 if self.log != self.logBuffer { self.log = self.logBuffer }
+                self.updateDerivedState()
             }
         }
+    }
+
+    /// Ricava dal coda dell'output le informazioni che l'interfaccia mostra
+    /// al posto del terminale: cosa sta facendo e a che punto è.
+    private func updateDerivedState() {
+        let tail = String(logBuffer.suffix(4_000))
+        if let pct = Self.parsePercent(tail) { progress = pct }
+        if let status = Self.parseStatus(tail) { statusLine = status }
+    }
+
+    /// Ultima percentuale trovata nel testo (le barre di rich la stampano).
+    nonisolated static func parsePercent(_ text: String) -> Double? {
+        var last: Double?
+        var search = text[...]
+        while let r = search.range(of: #"(\d{1,3})\s?%"#, options: .regularExpression) {
+            let digits = search[r].filter(\.isNumber)
+            if let n = Double(digits), n <= 100 { last = n / 100 }
+            search = search[r.upperBound...]
+        }
+        return last
+    }
+
+    /// Ultima riga "raccontabile": scarta banner ASCII, cornici di tabella,
+    /// righe di sole percentuali e l'eco dei comandi.
+    nonisolated static func parseStatus(_ text: String) -> String? {
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: true)
+        for raw in lines.reversed() {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            guard line.count > 4, line.count < 160 else { continue }
+            if line.hasPrefix("$") || line.hasPrefix("›") { continue }
+            // Scarta righe fatte quasi solo di simboli (arte ASCII, cornici).
+            let letters = line.filter { $0.isLetter }.count
+            guard Double(letters) / Double(line.count) > 0.45 else { continue }
+            return line
+        }
+        return nil
+    }
+
+    /// Riporta il runner allo stato iniziale per una nuova ricerca.
+    func reset() {
+        guard !isRunning else { return }
+        phase = .idle
+        log = ""
+        logBuffer = ""
+        statusLine = ""
+        progress = nil
+        pendingPrompt = nil
+        downloadedFiles = []
+        currentCommand = []
     }
 
     /// Debounce: ogni volta che arriva output nuovo si azzera l'attesa. Se
@@ -316,45 +376,86 @@ final class VibraVidRunner: ObservableObject {
         return replies
     }
 
-    /// Cerca l'ultima tabella "box" nel log e la trasforma in righe/colonne.
-    /// Tollera i due stili di riquadro usati da rich (linee sottili `│` e
-    /// grosse `┃`) e i separatori a doppia linea.
-    nonisolated static func parseTable(in log: String) -> PromptTable? {
-        // Lavoriamo sulle ultime ~40 righe per non scansionare l'intero log.
-        let lines = log.split(separator: "\n", omittingEmptySubsequences: false).suffix(80).map(String.init)
-        // Individua l'ultima riga di chiusura tabella.
-        let bottomChars: Set<Character> = ["└", "╰", "┗", "╚"]
-        guard let bottomIdx = lines.lastIndex(where: { line in
-            line.contains(where: { bottomChars.contains($0) })
-        }) else { return nil }
-        // ...e la relativa apertura, appena sopra.
-        let topChars: Set<Character> = ["┌", "╭", "┏", "╔"]
-        guard let topIdx = lines[..<bottomIdx].lastIndex(where: { line in
-            line.contains(where: { topChars.contains($0) })
-        }) else { return nil }
+    // nonisolated: le usano le funzioni di parsing, che girano fuori dal
+    // main actor sul thread di lettura della pipe.
+    private nonisolated static let boxTop: Set<Character> = ["┌", "╭", "┏", "╔"]
+    private nonisolated static let boxBottom: Set<Character> = ["└", "╰", "┗", "╚"]
+    private nonisolated static let boxSeparators: Set<Character> = ["│", "┃", "|"]
+    private nonisolated static let boxFillers = "─━═┃│|├┤┣┫╞╡╪┼┿╫╪+-"
 
-        let separators: Set<Character> = ["│", "┃"]
+    /// Cerca l'ultima tabella nel log e la trasforma in righe/colonne.
+    /// Tollera i riquadri di rich (`│`/`┃`) e le tabelle ASCII con `|`.
+    nonisolated static func parseTable(in log: String) -> PromptTable? {
+        let lines = log.split(separator: "\n", omittingEmptySubsequences: false)
+            .suffix(120).map(String.init)
+
+        // Delimita la tabella: preferisce i bordi disegnati, ma se mancano
+        // (tabelle ASCII senza cornice) prende il blocco contiguo di righe
+        // che contengono separatori.
+        let bounds = tableBounds(in: lines)
+        guard let (start, end) = bounds, end > start else { return nil }
+
         var rawRows: [[String]] = []
-        for i in (topIdx + 1)..<bottomIdx {
+        for i in start...end {
             let line = lines[i]
-            guard line.contains(where: { separators.contains($0) }) else { continue }
-            // Se la riga è tutta caratteri di separazione orizzontali la saltiamo.
-            let onlyBox = line.allSatisfy { c in
-                c.isWhitespace || "─━═┃│├┤┣┫╞╡╪┼┿╫╪".contains(c) || topChars.contains(c) || bottomChars.contains(c)
+            guard line.contains(where: { boxSeparators.contains($0) }) else { continue }
+            // Righe di sole decorazioni orizzontali: non sono dati.
+            let isRule = line.allSatisfy { c in
+                c.isWhitespace || boxFillers.contains(c)
+                    || boxTop.contains(c) || boxBottom.contains(c)
             }
-            if onlyBox { continue }
-            let cells = line.split(whereSeparator: { separators.contains($0) })
-                .map { $0.trimmingCharacters(in: .whitespaces) }
-                .filter { !$0.isEmpty }
-            if !cells.isEmpty { rawRows.append(cells) }
+            if isRule { continue }
+            if let cells = splitCells(line) { rawRows.append(cells) }
         }
+
         guard rawRows.count >= 2 else { return nil }
-        // La prima riga è l'header.
         let headers = rawRows[0]
         let width = headers.count
-        let body = rawRows.dropFirst().filter { $0.count == width }
+        guard width > 0 else { return nil }
+
+        // Le righe con celle vuote NON vanno scartate: si normalizzano alla
+        // larghezza dell'intestazione. Prima venivano perse in silenzio, e
+        // un titolo senza anno o senza lingua semplicemente spariva.
+        let body: [[String]] = rawRows.dropFirst().map { row in
+            if row.count == width { return row }
+            if row.count > width { return Array(row.prefix(width)) }
+            return row + Array(repeating: "", count: width - row.count)
+        }
         guard !body.isEmpty else { return nil }
-        return PromptTable(headers: headers, rows: Array(body))
+        return PromptTable(headers: headers, rows: body)
+    }
+
+    /// Indici della prima e ultima riga della tabella più recente.
+    private nonisolated static func tableBounds(in lines: [String]) -> (Int, Int)? {
+        if let bottom = lines.lastIndex(where: { l in l.contains(where: { boxBottom.contains($0) }) }),
+           let top = lines[..<bottom].lastIndex(where: { l in l.contains(where: { boxTop.contains($0) }) }) {
+            return (top + 1, bottom - 1)
+        }
+        // Nessuna cornice: si prende l'ultimo blocco contiguo con separatori.
+        guard let last = lines.lastIndex(where: { l in
+            l.contains(where: { boxSeparators.contains($0) })
+        }) else { return nil }
+        var first = last
+        while first > 0,
+              lines[first - 1].contains(where: { boxSeparators.contains($0) }) {
+            first -= 1
+        }
+        return first < last ? (first, last) : nil
+    }
+
+    /// Divide una riga in celle preservando quelle vuote all'interno, e
+    /// togliendo solo i vuoti generati dai bordi esterni.
+    private nonisolated static func splitCells(_ line: String) -> [String]? {
+        var cells = line
+            .split(omittingEmptySubsequences: false,
+                   whereSeparator: { boxSeparators.contains($0) })
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+        // Il primo e l'ultimo pezzo sono vuoti quando la riga inizia e finisce
+        // con un separatore: sono i bordi, non colonne.
+        if cells.first?.isEmpty == true { cells.removeFirst() }
+        if cells.last?.isEmpty == true { cells.removeLast() }
+        let meaningful = cells.contains { !$0.isEmpty }
+        return meaningful ? cells : nil
     }
 
     /// Rimuove i codici ANSI residui che rich stampa in alcuni contesti anche
