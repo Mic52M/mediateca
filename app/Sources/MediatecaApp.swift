@@ -10,7 +10,9 @@ struct MediatecaApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(model)
-                .frame(minWidth: 900, minHeight: 620)
+                .frame(minWidth: 980, minHeight: 660)
+                .tint(Theme.accent)
+                .preferredColorScheme(.dark)
                 .onAppear {
                     AppDelegate.model = model
                     AppDelegate.drainPending()

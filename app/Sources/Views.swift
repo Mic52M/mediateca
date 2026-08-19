@@ -78,12 +78,14 @@ struct LibraryScreen: View {
     var body: some View {
         NavigationSplitView {
             List(selection: $model.selection) {
-                Label("Home", systemImage: "house")
-                    .tag(AppModel.SidebarItem.home)
-                Label("Scarica", systemImage: "arrow.down.circle")
-                    .tag(AppModel.SidebarItem.download)
-                Label("Impostazioni", systemImage: "gearshape")
-                    .tag(AppModel.SidebarItem.settings)
+                Section {
+                    Label("Home", systemImage: "house.fill")
+                        .tag(AppModel.SidebarItem.home)
+                    Label("Scarica", systemImage: "arrow.down.circle.fill")
+                        .tag(AppModel.SidebarItem.download)
+                    Label("Impostazioni", systemImage: "gearshape.fill")
+                        .tag(AppModel.SidebarItem.settings)
+                }
 
                 if !model.tvSeries.isEmpty {
                     Section("Serie tv") {
@@ -96,17 +98,21 @@ struct LibraryScreen: View {
                     }
                 }
             }
-            .navigationSplitViewColumnWidth(min: 220, ideal: 250)
+            .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
+            .background(Theme.background.opacity(0.85))
+            .navigationSplitViewColumnWidth(min: 240, ideal: 270)
             .safeAreaInset(edge: .bottom) {
                 Button {
                     model.beginImport()
                 } label: {
-                    Label("Aggiungi serie…", systemImage: "plus")
+                    Label("Aggiungi contenuto", systemImage: "plus")
                         .frame(maxWidth: .infinity)
+                        .padding(.vertical, 4)
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
-                .padding(10)
+                .padding(Theme.Spacing.md)
             }
         } detail: {
             switch model.selection {
@@ -195,66 +201,204 @@ struct HomeScreen: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.xxl) {
+
+                if let featured = model.featured {
+                    HeroBanner(ref: featured)
+                        .padding(.horizontal, Theme.Spacing.xl)
+                        .padding(.top, Theme.Spacing.md)
+                }
+
                 if !model.continueWatching.isEmpty {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Continua a guardare").font(.title2).bold()
+                    homeSection("Continua a guardare") {
                         ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 16) {
+                            HStack(spacing: Theme.Spacing.lg) {
                                 ForEach(model.continueWatching) { r in
                                     ContinueCard(ref: r)
                                 }
                             }
-                            .padding(.bottom, 4)
+                            .padding(.horizontal, Theme.Spacing.xl)
+                            .padding(.vertical, Theme.Spacing.xs)
                         }
                     }
                 }
 
                 if model.data.series.isEmpty && model.data.loose.isEmpty {
                     EmptyState()
-                } else {
-                    if !model.tvSeries.isEmpty {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text("Serie tv").font(.title2).bold()
-                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: 16)],
-                                      alignment: .leading, spacing: 20) {
-                                ForEach(model.tvSeries) { s in
-                                    SeriesCard(series: s)
-                                }
-                            }
-                        }
-                    }
+                        .padding(.horizontal, Theme.Spacing.xl)
+                }
 
-                    if !model.movies.isEmpty {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text("Film").font(.title2).bold()
-                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: 16)],
-                                      alignment: .leading, spacing: 20) {
-                                ForEach(model.movies) { s in
-                                    SeriesCard(series: s)
-                                }
-                            }
-                        }
-                    }
-
-                    if !model.data.loose.isEmpty {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text("Video singoli").font(.title2).bold()
-                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: 16)],
-                                      alignment: .leading, spacing: 20) {
-                                ForEach(model.data.loose) { ep in
-                                    ContinueCard(ref: model.ref(for: ep),
-                                                 showRemoveControl: false)
-                                }
-                            }
-                        }
+                if !model.tvSeries.isEmpty {
+                    homeSection("Serie tv") {
+                        cardGrid(items: model.tvSeries)
                     }
                 }
+
+                if !model.movies.isEmpty {
+                    homeSection("Film") {
+                        cardGrid(items: model.movies)
+                    }
+                }
+
+                if !model.data.loose.isEmpty {
+                    homeSection("Video singoli") {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: Theme.Spacing.lg)],
+                                  alignment: .leading, spacing: Theme.Spacing.xl) {
+                            ForEach(model.data.loose) { ep in
+                                ContinueCard(ref: model.ref(for: ep),
+                                             showRemoveControl: false)
+                            }
+                        }
+                        .padding(.horizontal, Theme.Spacing.xl)
+                    }
+                }
+
+                Spacer(minLength: 40)
             }
-            .padding(28)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .themedBackground()
         .navigationTitle("Mediateca")
+    }
+
+    // MARK: pezzi riusabili
+
+    @ViewBuilder
+    private func homeSection<Content: View>(
+        _ title: String,
+        @ViewBuilder _ content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+            Text(title)
+                .font(.title3).bold()
+                .foregroundStyle(Theme.text)
+                .padding(.horizontal, Theme.Spacing.xl)
+            content()
+        }
+    }
+
+    private func cardGrid(items: [Series]) -> some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: Theme.Spacing.lg)],
+                  alignment: .leading, spacing: Theme.Spacing.xl) {
+            ForEach(items) { s in SeriesCard(series: s) }
+        }
+        .padding(.horizontal, Theme.Spacing.xl)
+    }
+}
+
+// MARK: - Hero banner in home
+
+private struct HeroBanner: View {
+    @EnvironmentObject var model: AppModel
+    let ref: EpisodeRef
+    @State private var hovering = false
+
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            // Immagine di sfondo grande, poi due overlay: il gradient laterale
+            // per la leggibilità del testo, e quello dal basso per rifinire.
+            Thumbnail(episodeID: ref.episode.id,
+                      ready: model.thumbReady.contains(ref.episode.id))
+                .equatable()
+                .aspectRatio(21.0/9.0, contentMode: .fill)
+                .frame(maxWidth: .infinity)
+                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.xl))
+
+            Theme.heroOverlay
+                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.xl))
+                .allowsHitTesting(false)
+
+            content
+                .padding(Theme.Spacing.xxl)
+        }
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.Radius.xl)
+                .strokeBorder(Theme.border, lineWidth: 0.5)
+        )
+        .frame(maxWidth: .infinity)
+        .shadow(color: .black.opacity(0.35), radius: 22, x: 0, y: 12)
+        .scaleEffect(hovering ? 1.005 : 1.0)
+        .animation(.easeInOut(duration: 0.2), value: hovering)
+        .onHover { hovering = $0 }
+    }
+
+    private var content: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+            HStack(spacing: Theme.Spacing.sm) {
+                Text(ref.episode.started ? "CONTINUA" : "IN EVIDENZA")
+                    .font(.caption2).bold()
+                    .tracking(2)
+                    .foregroundStyle(Theme.accent)
+                if let seriesID = ref.seriesID, let s = model.series(seriesID) {
+                    Text(s.isMovie ? "FILM" : "SERIE TV")
+                        .font(.caption2).bold()
+                        .tracking(2)
+                        .foregroundStyle(Theme.textSecondary)
+                }
+            }
+
+            Text(displayTitle)
+                .font(.system(size: 40, weight: .bold))
+                .foregroundStyle(.white)
+                .lineLimit(2)
+                .shadow(color: .black.opacity(0.5), radius: 6, y: 2)
+
+            HStack(spacing: Theme.Spacing.md) {
+                if ref.episode.duration > 0 {
+                    Label(formatTime(ref.episode.duration), systemImage: "clock")
+                }
+                if !ref.seasonLabel.isEmpty {
+                    Text("S\(ref.seasonNumber)E\(ref.episode.number)")
+                }
+                if ref.episode.started {
+                    Text("Restano \(formatTime(ref.episode.remaining))")
+                        .foregroundStyle(Theme.accent)
+                }
+            }
+            .font(.callout)
+            .foregroundStyle(Theme.textSecondary)
+
+            if ref.episode.progress > 0 {
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Color.white.opacity(0.18))
+                        Capsule().fill(Theme.accent)
+                            .frame(width: geo.size.width * ref.episode.progress)
+                    }
+                }
+                .frame(width: 320, height: 4)
+            }
+
+            HStack(spacing: Theme.Spacing.md) {
+                Button {
+                    model.play(ref)
+                } label: {
+                    Label(ref.episode.started ? "Riprendi" : "Riproduci",
+                          systemImage: "play.fill")
+                        .font(.headline)
+                        .padding(.horizontal, 6)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+
+                if let seriesID = ref.seriesID {
+                    Button {
+                        model.selection = .series(seriesID)
+                    } label: {
+                        Label("Vai alla serie", systemImage: "rectangle.stack")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    .tint(.white)
+                }
+            }
+            .padding(.top, Theme.Spacing.xs)
+        }
+        .frame(maxWidth: 560, alignment: .leading)
+    }
+
+    private var displayTitle: String {
+        if let seriesID = ref.seriesID, let s = model.series(seriesID) { return s.title }
+        return ref.episode.title
     }
 }
 
@@ -262,21 +406,49 @@ struct EmptyState: View {
     @EnvironmentObject var model: AppModel
 
     var body: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "film.stack")
-                .font(.system(size: 46))
-                .foregroundStyle(.secondary)
-            Text("La libreria è vuota").font(.title3).bold()
-            Text("Trascina qui i tuoi episodi, oppure aggiungi una serie e dai un titolo e una stagione.")
-                .foregroundStyle(.secondary)
+        VStack(spacing: Theme.Spacing.lg) {
+            ZStack {
+                Circle()
+                    .fill(Theme.accentSoft)
+                    .frame(width: 110, height: 110)
+                Image(systemName: "film.stack")
+                    .font(.system(size: 48, weight: .semibold))
+                    .foregroundStyle(Theme.accent)
+            }
+            .shadow(color: Theme.accent.opacity(0.25), radius: 18)
+
+            Text("La libreria è vuota")
+                .font(.title2).bold()
+                .foregroundStyle(Theme.text)
+
+            Text("Aggiungi la tua prima serie o film, trascina qui i video, o vai su “Scarica”.")
+                .foregroundStyle(Theme.textSecondary)
                 .multilineTextAlignment(.center)
-                .frame(maxWidth: 420)
-            Button("Aggiungi serie…") { model.beginImport() }
+                .frame(maxWidth: 460)
+
+            HStack(spacing: Theme.Spacing.md) {
+                Button {
+                    model.beginImport()
+                } label: {
+                    Label("Aggiungi contenuto", systemImage: "plus")
+                        .padding(.horizontal, 6)
+                }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
+
+                Button {
+                    model.selection = .download
+                } label: {
+                    Label("Scarica online", systemImage: "arrow.down.circle")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+                .tint(.white)
+            }
+            .padding(.top, 4)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 60)
+        .padding(.vertical, 80)
     }
 }
 
@@ -310,62 +482,23 @@ struct ContinueCard: View {
     let ref: EpisodeRef
     @State private var hovering = false
 
-    /// Se lo mostriamo, la card è nella riga "Continua a guardare" — c'è quindi
-    /// senso proporre un modo rapido per toglierla da lì.
     var showRemoveControl: Bool = true
+
+    private let cardWidth: CGFloat = 260
+    private let cardHeight: CGFloat = 146
 
     var body: some View {
         Button {
             model.play(ref)
         } label: {
-            VStack(alignment: .leading, spacing: 8) {
-                ZStack(alignment: .bottom) {
-                    Thumbnail(episodeID: ref.episode.id, ready: model.thumbReady.contains(ref.episode.id))
-                        .equatable()
-                        .frame(width: 236, height: 133)
-                        .clipped()
-                    if ref.episode.progress > 0 {
-                        GeometryReader { geo in
-                            ZStack(alignment: .leading) {
-                                Rectangle().fill(.white.opacity(0.3))
-                                Rectangle().fill(Color.accentColor)
-                                    .frame(width: geo.size.width * ref.episode.progress)
-                            }
-                        }
-                        .frame(height: 4)
-                    }
-                }
-                .frame(width: 236, height: 133)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-                .overlay(alignment: .topTrailing) {
-                    if ref.episode.missing {
-                        Label("File mancante", systemImage: "exclamationmark.triangle.fill")
-                            .labelStyle(.iconOnly)
-                            .padding(6)
-                            .background(.black.opacity(0.6), in: Circle())
-                            .foregroundStyle(.orange)
-                            .padding(6)
-                    } else if showRemoveControl && ref.episode.started {
-                        removeButton
-                            .padding(6)
-                            .opacity(hovering ? 1 : 0)
-                            .animation(.easeInOut(duration: 0.15), value: hovering)
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(ref.episode.title).lineLimit(1).font(.callout).bold()
-                    Text(ref.episode.remaining > 0 && ref.episode.position > 0
-                         ? "\(ref.subtitle) · restano \(formatTime(ref.episode.remaining))"
-                         : ref.subtitle)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                .frame(width: 236, alignment: .leading)
+            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                thumbnail
+                info
             }
         }
         .buttonStyle(.plain)
+        .scaleEffect(hovering ? 1.03 : 1.0)
+        .animation(.spring(response: 0.28, dampingFraction: 0.85), value: hovering)
         .onHover { hovering = $0 }
         .contextMenu {
             Button("Riproduci") { model.play(ref) }
@@ -385,8 +518,95 @@ struct ContinueCard: View {
         }
     }
 
-    /// Piccola X in overlay: preferisco un bottone dedicato al menu contestuale
-    /// perché è scopribile — chi guarda la riga vede subito che si può togliere.
+    private var thumbnail: some View {
+        ZStack(alignment: .bottom) {
+            Thumbnail(episodeID: ref.episode.id,
+                      ready: model.thumbReady.contains(ref.episode.id))
+                .equatable()
+                .frame(width: cardWidth, height: cardHeight)
+                .clipped()
+
+            // Gradient sempre presente ma lieve, si intensifica al passaggio.
+            LinearGradient(
+                colors: [.clear, .black.opacity(hovering ? 0.55 : 0.35)],
+                startPoint: .center, endPoint: .bottom
+            )
+            .frame(width: cardWidth, height: cardHeight)
+
+            if hovering {
+                Image(systemName: "play.circle.fill")
+                    .font(.system(size: 46))
+                    .foregroundStyle(.white, Theme.accent)
+                    .shadow(color: .black.opacity(0.5), radius: 8)
+                    .padding(.bottom, ref.episode.progress > 0 ? 18 : 12)
+            }
+
+            if ref.episode.progress > 0 {
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Rectangle().fill(Color.white.opacity(0.22))
+                        Rectangle().fill(Theme.accent)
+                            .frame(width: geo.size.width * ref.episode.progress)
+                    }
+                }
+                .frame(height: 3)
+            }
+        }
+        .frame(width: cardWidth, height: cardHeight)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.md))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.Radius.md)
+                .strokeBorder(Theme.border, lineWidth: 0.5)
+        )
+        .overlay(alignment: .topTrailing) {
+            if ref.episode.missing {
+                badge("File mancante", icon: "exclamationmark.triangle.fill",
+                      color: Theme.danger)
+            } else if showRemoveControl && ref.episode.started {
+                removeButton
+                    .padding(6)
+                    .opacity(hovering ? 1 : 0)
+                    .animation(.easeInOut(duration: 0.15), value: hovering)
+            }
+        }
+        .overlay(alignment: .topLeading) {
+            if ref.episode.finished {
+                Label("Visto", systemImage: "checkmark.circle.fill")
+                    .labelStyle(.iconOnly)
+                    .foregroundStyle(Theme.success)
+                    .padding(8)
+                    .background(.black.opacity(0.55), in: Circle())
+                    .padding(6)
+            }
+        }
+        .shadow(color: .black.opacity(hovering ? 0.35 : 0.2),
+                radius: hovering ? 14 : 6, x: 0, y: hovering ? 8 : 3)
+    }
+
+    private var info: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(ref.episode.title)
+                .lineLimit(1).font(.callout).bold()
+                .foregroundStyle(Theme.text)
+            Text(ref.episode.remaining > 0 && ref.episode.position > 0
+                 ? "\(ref.subtitle) · restano \(formatTime(ref.episode.remaining))"
+                 : ref.subtitle)
+                .font(.caption)
+                .foregroundStyle(Theme.textSecondary)
+                .lineLimit(1)
+        }
+        .frame(width: cardWidth, alignment: .leading)
+    }
+
+    private func badge(_ text: String, icon: String, color: Color) -> some View {
+        Label(text, systemImage: icon)
+            .labelStyle(.iconOnly)
+            .padding(6)
+            .background(.black.opacity(0.6), in: Circle())
+            .foregroundStyle(color)
+            .padding(6)
+    }
+
     private var removeButton: some View {
         Button {
             model.dismissFromContinueWatching(ref.episode.id)
@@ -395,7 +615,7 @@ struct ContinueCard: View {
                 .font(.system(size: 11, weight: .bold))
                 .foregroundStyle(.white)
                 .frame(width: 22, height: 22)
-                .background(.black.opacity(0.72), in: Circle())
+                .background(.black.opacity(0.78), in: Circle())
         }
         .buttonStyle(.plain)
         .help("Rimuovi da “Continua a guardare”")
@@ -405,33 +625,21 @@ struct ContinueCard: View {
 struct SeriesCard: View {
     @EnvironmentObject var model: AppModel
     let series: Series
+    @State private var hovering = false
 
     var body: some View {
         Button {
             model.selection = .series(series.id)
         } label: {
-            VStack(alignment: .leading, spacing: 8) {
-                Thumbnail(episodeID: series.firstEpisode?.id ?? series.id,
-                          ready: model.thumbReady.contains(series.firstEpisode?.id ?? series.id))
-                    .equatable()
-                    .frame(height: 116)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                    .overlay(alignment: .topLeading) {
-                        if series.isMovie {
-                            Label("Film", systemImage: "film")
-                                .labelStyle(.iconOnly)
-                                .padding(6)
-                                .background(.black.opacity(0.55), in: Circle())
-                                .foregroundStyle(.white)
-                                .padding(6)
-                        }
-                    }
-                Text(series.title).font(.callout).bold().lineLimit(1)
-                Text(cardSubtitle)
-                    .font(.caption).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                thumbnail
+                info
             }
         }
         .buttonStyle(.plain)
+        .scaleEffect(hovering ? 1.03 : 1.0)
+        .animation(.spring(response: 0.28, dampingFraction: 0.85), value: hovering)
+        .onHover { hovering = $0 }
         .contextMenu {
             if !series.isMovie {
                 Button("Aggiungi episodi…") { model.beginImport(into: series.id) }
@@ -439,7 +647,59 @@ struct SeriesCard: View {
             Button(series.isMovie ? "Converti in serie tv" : "Converti in film") {
                 model.toggleKind(series.id)
             }
-            Button("Rimuovi dalla libreria", role: .destructive) { model.requestRemoveSeries(series.id) }
+            Button("Rimuovi dalla libreria", role: .destructive) {
+                model.requestRemoveSeries(series.id)
+            }
+        }
+    }
+
+    private var thumbnail: some View {
+        ZStack(alignment: .bottom) {
+            Thumbnail(episodeID: series.firstEpisode?.id ?? series.id,
+                      ready: model.thumbReady.contains(series.firstEpisode?.id ?? series.id))
+                .equatable()
+                .aspectRatio(16.0/9.0, contentMode: .fill)
+                .frame(minHeight: 120)
+                .clipped()
+
+            LinearGradient(
+                colors: [.clear, .black.opacity(hovering ? 0.5 : 0.28)],
+                startPoint: .center, endPoint: .bottom
+            )
+
+            if hovering {
+                Image(systemName: "play.circle.fill")
+                    .font(.system(size: 42))
+                    .foregroundStyle(.white, Theme.accent)
+                    .shadow(color: .black.opacity(0.4), radius: 6)
+                    .padding(.bottom, 10)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.md))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.Radius.md)
+                .strokeBorder(Theme.border, lineWidth: 0.5)
+        )
+        .overlay(alignment: .topLeading) {
+            if series.isMovie {
+                Text("FILM")
+                    .chip(color: Theme.accent)
+                    .padding(8)
+            }
+        }
+        .shadow(color: .black.opacity(hovering ? 0.3 : 0.15),
+                radius: hovering ? 12 : 5, x: 0, y: hovering ? 8 : 3)
+    }
+
+    private var info: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(series.title)
+                .font(.callout).bold()
+                .foregroundStyle(Theme.text)
+                .lineLimit(1)
+            Text(cardSubtitle)
+                .font(.caption)
+                .foregroundStyle(Theme.textSecondary)
         }
     }
 
@@ -483,96 +743,137 @@ struct SeriesDetail: View {
 
     private var seriesBody: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                HStack(alignment: .top, spacing: 18) {
-                    Thumbnail(episodeID: series.firstEpisode?.id ?? series.id,
-                              ready: model.thumbReady.contains(series.firstEpisode?.id ?? series.id))
-                        .equatable()
-                        .frame(width: 260, height: 146)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text(series.title).font(.largeTitle).bold()
-                        Text("\(series.seasons.count) stagion\(series.seasons.count == 1 ? "e" : "i") · \(series.episodeCount) episodi")
-                            .foregroundStyle(.secondary)
-                        HStack(spacing: 10) {
-                            if let r = resumeTarget {
-                                Button {
-                                    model.play(r)
-                                } label: {
-                                    Label(r.episode.started
-                                          ? "Riprendi S\(r.seasonNumber)E\(r.episode.number)"
-                                          : "Riproduci S\(r.seasonNumber)E\(r.episode.number)",
-                                          systemImage: "play.fill")
-                                }
-                                .buttonStyle(.borderedProminent)
-                                .controlSize(.large)
-                            }
-                            Button {
-                                model.beginImport(into: series.id, season: seasonNumber)
-                            } label: {
-                                Label("Aggiungi episodi", systemImage: "plus")
-                            }
-                            .controlSize(.large)
-                        }
-                    }
-                    Spacer()
-                }
+            VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
+                seriesHero
+                    .padding(.horizontal, Theme.Spacing.xl)
+                    .padding(.top, Theme.Spacing.md)
 
                 if let season {
-                    HStack(spacing: 12) {
-                        Picker("Stagione", selection: Binding(
-                            get: { season.number },
-                            set: { seasonNumber = $0 }
-                        )) {
-                            ForEach(series.seasons) { s in
-                                Text("\(s.label)  (\(s.episodes.count) ep.)").tag(s.number)
+                    VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+                        HStack(spacing: Theme.Spacing.md) {
+                            Picker("Stagione", selection: Binding(
+                                get: { season.number },
+                                set: { seasonNumber = $0 }
+                            )) {
+                                ForEach(series.seasons) { s in
+                                    Text("\(s.label)  (\(s.episodes.count) ep.)").tag(s.number)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .labelsHidden()
+                            .frame(width: 240)
+
+                            Menu {
+                                Button("Ordina per numero episodio") {
+                                    model.sortSeasonByNumber(series.id, season.number)
+                                }
+                                Button("Inverti l'ordine") {
+                                    model.reverseSeason(series.id, season.number)
+                                }
+                                Divider()
+                                Button("Rinumera 1…\(season.episodes.count) nell'ordine attuale") {
+                                    model.renumberSeasonInOrder(series.id, season.number)
+                                }
+                            } label: {
+                                Label("Ordina", systemImage: "arrow.up.arrow.down")
+                            }
+                            .menuStyle(.borderlessButton)
+                            .fixedSize()
+
+                            Spacer()
+
+                            Text("Trascina o usa le frecce per riordinare.")
+                                .font(.caption)
+                                .foregroundStyle(Theme.textSecondary)
+                        }
+
+                        VStack(spacing: 0) {
+                            ForEach(Array(season.episodes.enumerated()), id: \.element.id) { index, ep in
+                                EpisodeRow(episode: ep,
+                                           series: series,
+                                           season: season,
+                                           index: index)
+                                if ep.id != season.episodes.last?.id {
+                                    Divider().overlay(Theme.border)
+                                }
                             }
                         }
-                        .pickerStyle(.menu)
-                        .labelsHidden()
-                        .frame(width: 240)
+                        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.lg))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: Theme.Radius.lg)
+                                .strokeBorder(Theme.border, lineWidth: 0.5)
+                        )
+                    }
+                    .padding(.horizontal, Theme.Spacing.xl)
+                }
 
-                        Menu {
-                            Button("Ordina per numero episodio") {
-                                model.sortSeasonByNumber(series.id, season.number)
-                            }
-                            Button("Inverti l'ordine") {
-                                model.reverseSeason(series.id, season.number)
-                            }
-                            Divider()
-                            Button("Rinumera 1…\(season.episodes.count) nell'ordine attuale") {
-                                model.renumberSeasonInOrder(series.id, season.number)
-                            }
+                Spacer(minLength: 30)
+            }
+        }
+        .themedBackground()
+        .navigationTitle(series.title)
+    }
+
+    private var seriesHero: some View {
+        ZStack(alignment: .bottomLeading) {
+            Thumbnail(episodeID: series.firstEpisode?.id ?? series.id,
+                      ready: model.thumbReady.contains(series.firstEpisode?.id ?? series.id))
+                .equatable()
+                .aspectRatio(21.0/9.0, contentMode: .fill)
+                .frame(maxWidth: .infinity, minHeight: 260, maxHeight: 320)
+                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.xl))
+            Theme.heroOverlay
+                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.xl))
+                .allowsHitTesting(false)
+
+            VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+                Text("SERIE TV")
+                    .font(.caption2).bold().tracking(2)
+                    .foregroundStyle(Theme.accent)
+
+                Text(series.title)
+                    .font(.system(size: 36, weight: .bold))
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+                    .shadow(color: .black.opacity(0.5), radius: 6, y: 2)
+
+                Text("\(series.seasons.count) stagion\(series.seasons.count == 1 ? "e" : "i") · \(series.episodeCount) episodi")
+                    .foregroundStyle(Theme.textSecondary)
+                    .font(.callout)
+
+                HStack(spacing: Theme.Spacing.md) {
+                    if let r = resumeTarget {
+                        Button {
+                            model.play(r)
                         } label: {
-                            Label("Ordina", systemImage: "arrow.up.arrow.down")
+                            Label(r.episode.started
+                                  ? "Riprendi S\(r.seasonNumber)E\(r.episode.number)"
+                                  : "Riproduci S\(r.seasonNumber)E\(r.episode.number)",
+                                  systemImage: "play.fill")
+                                .font(.headline)
+                                .padding(.horizontal, 6)
                         }
-                        .menuStyle(.borderlessButton)
-                        .fixedSize()
-
-                        Text("Trascina le righe, o usa le frecce che compaiono passandoci sopra.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Spacer()
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
                     }
-
-                    VStack(spacing: 0) {
-                        ForEach(Array(season.episodes.enumerated()), id: \.element.id) { index, ep in
-                            EpisodeRow(episode: ep,
-                                       series: series,
-                                       season: season,
-                                       index: index)
-                            if ep.id != season.episodes.last?.id { Divider() }
-                        }
+                    Button {
+                        model.beginImport(into: series.id, season: seasonNumber)
+                    } label: {
+                        Label("Aggiungi episodi", systemImage: "plus")
                     }
-                    .background(Color(nsColor: .controlBackgroundColor),
-                                in: RoundedRectangle(cornerRadius: 10))
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    .tint(.white)
                 }
             }
-            .padding(28)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: 560, alignment: .leading)
+            .padding(Theme.Spacing.xxl)
         }
-        .navigationTitle(series.title)
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.Radius.xl)
+                .strokeBorder(Theme.border, lineWidth: 0.5)
+        )
+        .shadow(color: .black.opacity(0.3), radius: 18, y: 10)
     }
 }
 
@@ -590,87 +891,13 @@ struct MovieDetail: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
-                HStack(alignment: .top, spacing: 22) {
-                    Thumbnail(
-                        episodeID: episode?.id ?? series.id,
-                        ready: model.thumbReady.contains(episode?.id ?? series.id)
-                    )
-                    .equatable()
-                    .frame(width: 340, height: 191)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .overlay(alignment: .topLeading) {
-                        Label("Film", systemImage: "film")
-                            .font(.caption).bold()
-                            .padding(.horizontal, 8).padding(.vertical, 4)
-                            .background(.black.opacity(0.55), in: Capsule())
-                            .foregroundStyle(.white)
-                            .padding(10)
-                    }
-
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text(series.title).font(.largeTitle).bold().lineLimit(2)
-
-                        if let ep = episode {
-                            HStack(spacing: 14) {
-                                if ep.duration > 0 {
-                                    Label(formatTime(ep.duration), systemImage: "clock")
-                                }
-                                if ep.finished {
-                                    Label("Visto", systemImage: "checkmark.seal.fill")
-                                        .foregroundStyle(.green)
-                                } else if ep.started {
-                                    Label("Restano \(formatTime(ep.remaining))",
-                                          systemImage: "arrow.uturn.forward")
-                                        .foregroundStyle(.tint)
-                                }
-                                if ep.missing {
-                                    Label("File mancante", systemImage: "exclamationmark.triangle")
-                                        .foregroundStyle(.orange)
-                                }
-                                if ep.needsConversion {
-                                    Label(".\(ep.url.pathExtension) da convertire",
-                                          systemImage: "wand.and.rays")
-                                        .foregroundStyle(.orange)
-                                }
-                            }
-                            .font(.callout).foregroundStyle(.secondary)
-
-                            HStack(spacing: 10) {
-                                Button {
-                                    if let r = ref { model.play(r) }
-                                } label: {
-                                    Label(ep.started ? "Riprendi" : "Riproduci",
-                                          systemImage: "play.fill")
-                                }
-                                .buttonStyle(.borderedProminent)
-                                .controlSize(.large)
-                                .disabled(ep.missing)
-
-                                if ep.progress > 0 {
-                                    Button {
-                                        model.update(ep.id) {
-                                            $0.position = 0
-                                            $0.finished = false
-                                        }
-                                    } label: {
-                                        Label("Ricomincia", systemImage: "backward.end")
-                                    }
-                                    .controlSize(.large)
-                                }
-                            }
-
-                            if ep.progress > 0 {
-                                ProgressView(value: ep.progress).frame(maxWidth: 340)
-                            }
-                        }
-                        Spacer()
-                    }
-                    Spacer()
-                }
+            VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
+                movieHero
+                    .padding(.horizontal, Theme.Spacing.xl)
+                    .padding(.top, Theme.Spacing.md)
 
                 if let ep = episode {
-                    HStack {
+                    HStack(spacing: Theme.Spacing.md) {
                         Button {
                             NSWorkspace.shared.activateFileViewerSelecting([ep.url])
                         } label: {
@@ -687,13 +914,120 @@ struct MovieDetail: View {
                         Button("Rimuovi dalla libreria", role: .destructive) {
                             model.requestRemoveSeries(series.id)
                         }
+                        .tint(Theme.danger)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    .tint(.white)
+                    .padding(.horizontal, Theme.Spacing.xl)
+                }
+
+                Spacer(minLength: 30)
+            }
+        }
+        .themedBackground()
+        .navigationTitle(series.title)
+    }
+
+    private var movieHero: some View {
+        ZStack(alignment: .bottomLeading) {
+            Thumbnail(
+                episodeID: episode?.id ?? series.id,
+                ready: model.thumbReady.contains(episode?.id ?? series.id)
+            )
+            .equatable()
+            .aspectRatio(21.0/9.0, contentMode: .fill)
+            .frame(maxWidth: .infinity, minHeight: 280, maxHeight: 360)
+            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.xl))
+
+            Theme.heroOverlay
+                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.xl))
+                .allowsHitTesting(false)
+
+            VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+                Text("FILM")
+                    .font(.caption2).bold().tracking(2)
+                    .foregroundStyle(Theme.accent)
+
+                Text(series.title)
+                    .font(.system(size: 40, weight: .bold))
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+                    .shadow(color: .black.opacity(0.5), radius: 6, y: 2)
+
+                if let ep = episode {
+                    HStack(spacing: Theme.Spacing.md) {
+                        if ep.duration > 0 {
+                            Label(formatTime(ep.duration), systemImage: "clock")
+                        }
+                        if ep.finished {
+                            Label("Visto", systemImage: "checkmark.seal.fill")
+                                .foregroundStyle(Theme.success)
+                        } else if ep.started {
+                            Label("Restano \(formatTime(ep.remaining))",
+                                  systemImage: "arrow.uturn.forward")
+                                .foregroundStyle(Theme.accent)
+                        }
+                        if ep.missing {
+                            Label("File mancante", systemImage: "exclamationmark.triangle")
+                                .foregroundStyle(Theme.danger)
+                        }
+                        if ep.needsConversion {
+                            Label(".\(ep.url.pathExtension) da convertire",
+                                  systemImage: "wand.and.rays")
+                                .foregroundStyle(Theme.accent)
+                        }
+                    }
+                    .font(.callout).foregroundStyle(Theme.textSecondary)
+
+                    if ep.progress > 0 {
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                Capsule().fill(Color.white.opacity(0.18))
+                                Capsule().fill(Theme.accent)
+                                    .frame(width: geo.size.width * ep.progress)
+                            }
+                        }
+                        .frame(width: 320, height: 4)
+                    }
+
+                    HStack(spacing: Theme.Spacing.md) {
+                        Button {
+                            if let r = ref { model.play(r) }
+                        } label: {
+                            Label(ep.started ? "Riprendi" : "Riproduci",
+                                  systemImage: "play.fill")
+                                .font(.headline)
+                                .padding(.horizontal, 6)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        .disabled(ep.missing)
+
+                        if ep.progress > 0 {
+                            Button {
+                                model.update(ep.id) {
+                                    $0.position = 0
+                                    $0.finished = false
+                                }
+                            } label: {
+                                Label("Ricomincia", systemImage: "backward.end")
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.large)
+                            .tint(.white)
+                        }
                     }
                 }
             }
-            .padding(28)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: 560, alignment: .leading)
+            .padding(Theme.Spacing.xxl)
         }
-        .navigationTitle(series.title)
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.Radius.xl)
+                .strokeBorder(Theme.border, lineWidth: 0.5)
+        )
+        .shadow(color: .black.opacity(0.3), radius: 18, y: 10)
     }
 }
 

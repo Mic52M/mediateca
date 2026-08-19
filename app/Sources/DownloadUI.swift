@@ -24,7 +24,7 @@ struct DownloadScreen: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
-            Divider()
+            Divider().overlay(Theme.border)
 
             if !bridge.isInstalled {
                 installationMissing
@@ -45,15 +45,17 @@ struct DownloadScreen: View {
                 }
                 .padding(24)
 
-                Divider()
+                Divider().overlay(Theme.border)
                 if let prompt = runner.pendingPrompt {
                     PromptPanel(prompt: prompt, runner: runner)
-                        .padding(.horizontal, 24).padding(.top, 12)
-                    Divider().padding(.top, 12)
+                        .padding(.horizontal, Theme.Spacing.xl)
+                        .padding(.top, Theme.Spacing.md)
+                    Divider().overlay(Theme.border).padding(.top, Theme.Spacing.md)
                 }
                 logConsole
             }
         }
+        .themedBackground()
         .navigationTitle("Scarica")
     }
 

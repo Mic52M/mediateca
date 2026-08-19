@@ -34,15 +34,15 @@ struct SettingsScreen: View {
                 } label: { Label("Ricarica dai file", systemImage: "arrow.clockwise") }
                     .controlSize(.large)
             }
-            .padding(24)
-            Divider()
+            .padding(Theme.Spacing.xl)
+            Divider().overlay(Theme.border)
 
             Picker("", selection: $tab) {
                 ForEach(Tab.allCases) { Text($0.rawValue).tag($0) }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .padding(.horizontal, 24).padding(.top, 14)
+            .padding(.horizontal, Theme.Spacing.xl).padding(.top, Theme.Spacing.md)
 
             ScrollView {
                 Group {
@@ -53,9 +53,10 @@ struct SettingsScreen: View {
                     case .install:  InstallLocation(bridge: bridge)
                     }
                 }
-                .padding(24)
+                .padding(Theme.Spacing.xl)
             }
         }
+        .themedBackground()
         .navigationTitle("Impostazioni")
         .alert("Configurazione", isPresented: Binding(
             get: { bridge.loadError != nil },

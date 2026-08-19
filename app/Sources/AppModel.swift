@@ -185,6 +185,23 @@ final class AppModel: ObservableObject {
     /// Film in libreria.
     var movies: [Series] { data.series.filter { $0.isMovie } }
 
+    /// Titolo da mettere nell'hero banner della home: preferisce l'ultimo
+    /// episodio iniziato e non finito; se non c'è, il più recente in libreria.
+    var featured: EpisodeRef? {
+        if let ep = continueWatching.first { return ep }
+        // Fallback: il file più recente per data di modifica sul disco.
+        let candidates = allEpisodes.filter { !$0.missing }
+        let sorted = candidates.sorted {
+            (fileDate($0) ?? .distantPast) > (fileDate($1) ?? .distantPast)
+        }
+        if let ep = sorted.first { return ref(for: ep) }
+        return nil
+    }
+
+    private func fileDate(_ ep: Episode) -> Date? {
+        (try? FileManager.default.attributesOfItem(atPath: ep.path)[.modificationDate] as? Date)
+    }
+
     var continueWatching: [EpisodeRef] {
         allEpisodes
             .filter(\.started)
