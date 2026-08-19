@@ -292,29 +292,36 @@ private struct HeroBanner: View {
     let ref: EpisodeRef
     @State private var hovering = false
 
+    /// Altezza fissa: senza questa un aspectRatio 21:9 su finestre larghe
+    /// portava l'hero oltre i 500 pt, coprendo mezza schermata e mangiando
+    /// spazio alle righe sotto.
+    private let bannerHeight: CGFloat = 320
+
     var body: some View {
         ZStack(alignment: .bottomLeading) {
-            // Immagine di sfondo grande, poi due overlay: il gradient laterale
-            // per la leggibilità del testo, e quello dal basso per rifinire.
+            // Le nostre thumbnail sono 16:9. Le facciamo "riempire" un frame
+            // di altezza fissa e le clippiamo con l'angolo del container: si
+            // perde la parte alta/bassa ma si mantiene il feel cinematografico
+            // e la vista non esplode più.
             Thumbnail(episodeID: ref.episode.id,
                       ready: model.thumbReady.contains(ref.episode.id))
                 .equatable()
-                .aspectRatio(21.0/9.0, contentMode: .fill)
-                .frame(maxWidth: .infinity)
-                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.xl))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
 
             Theme.heroOverlay
-                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.xl))
                 .allowsHitTesting(false)
 
             content
                 .padding(Theme.Spacing.xxl)
         }
+        .frame(height: bannerHeight)
+        .frame(maxWidth: .infinity)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.xl))
         .overlay(
             RoundedRectangle(cornerRadius: Theme.Radius.xl)
                 .strokeBorder(Theme.border, lineWidth: 0.5)
         )
-        .frame(maxWidth: .infinity)
         .shadow(color: .black.opacity(0.35), radius: 22, x: 0, y: 12)
         .scaleEffect(hovering ? 1.005 : 1.0)
         .animation(.easeInOut(duration: 0.2), value: hovering)
@@ -658,8 +665,7 @@ struct SeriesCard: View {
             Thumbnail(episodeID: series.firstEpisode?.id ?? series.id,
                       ready: model.thumbReady.contains(series.firstEpisode?.id ?? series.id))
                 .equatable()
-                .aspectRatio(16.0/9.0, contentMode: .fill)
-                .frame(minHeight: 120)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .clipped()
 
             LinearGradient(
@@ -675,6 +681,9 @@ struct SeriesCard: View {
                     .padding(.bottom, 10)
             }
         }
+        // Aspect fisso 16:9 sulla ZStack: così la card resta compatta e la
+        // thumbnail non fa esplodere l'altezza della griglia.
+        .aspectRatio(16.0/9.0, contentMode: .fit)
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.md))
         .overlay(
             RoundedRectangle(cornerRadius: Theme.Radius.md)
@@ -819,11 +828,9 @@ struct SeriesDetail: View {
             Thumbnail(episodeID: series.firstEpisode?.id ?? series.id,
                       ready: model.thumbReady.contains(series.firstEpisode?.id ?? series.id))
                 .equatable()
-                .aspectRatio(21.0/9.0, contentMode: .fill)
-                .frame(maxWidth: .infinity, minHeight: 260, maxHeight: 320)
-                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.xl))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
             Theme.heroOverlay
-                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.xl))
                 .allowsHitTesting(false)
 
             VStack(alignment: .leading, spacing: Theme.Spacing.md) {
@@ -869,6 +876,9 @@ struct SeriesDetail: View {
             .frame(maxWidth: 560, alignment: .leading)
             .padding(Theme.Spacing.xxl)
         }
+        .frame(height: 300)
+        .frame(maxWidth: .infinity)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.xl))
         .overlay(
             RoundedRectangle(cornerRadius: Theme.Radius.xl)
                 .strokeBorder(Theme.border, lineWidth: 0.5)
@@ -936,12 +946,10 @@ struct MovieDetail: View {
                 ready: model.thumbReady.contains(episode?.id ?? series.id)
             )
             .equatable()
-            .aspectRatio(21.0/9.0, contentMode: .fill)
-            .frame(maxWidth: .infinity, minHeight: 280, maxHeight: 360)
-            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.xl))
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipped()
 
             Theme.heroOverlay
-                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.xl))
                 .allowsHitTesting(false)
 
             VStack(alignment: .leading, spacing: Theme.Spacing.md) {
@@ -1023,6 +1031,9 @@ struct MovieDetail: View {
             .frame(maxWidth: 560, alignment: .leading)
             .padding(Theme.Spacing.xxl)
         }
+        .frame(height: 340)
+        .frame(maxWidth: .infinity)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.xl))
         .overlay(
             RoundedRectangle(cornerRadius: Theme.Radius.xl)
                 .strokeBorder(Theme.border, lineWidth: 0.5)
