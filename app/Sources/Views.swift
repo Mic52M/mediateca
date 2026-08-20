@@ -307,15 +307,18 @@ private struct HeroBanner: View {
                 .padding(.top, Theme.Spacing.md)
         }
         .frame(maxWidth: .infinity, minHeight: bannerMinHeight, alignment: .bottomLeading)
+        // Immagine e gradient stanno entrambi in background, sotto al content:
+        // se l'overlay finisce sopra il testo, il gradient nero lo copre e il
+        // titolo appare scuro. È il bug che si vedeva prima.
         .background {
-            Thumbnail(episodeID: ref.episode.id,
-                      ready: model.thumbReady.contains(ref.episode.id))
-                .equatable()
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .clipped()
-        }
-        .overlay {
-            Theme.heroOverlay.allowsHitTesting(false)
+            ZStack {
+                Thumbnail(episodeID: ref.episode.id,
+                          ready: model.thumbReady.contains(ref.episode.id))
+                    .equatable()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
+                Theme.heroOverlay.allowsHitTesting(false)
+            }
         }
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.xl))
         .overlay(
@@ -384,7 +387,11 @@ private struct HeroBanner: View {
                 }
                 .buttonStyle(PrimaryButtonStyle())
 
-                if let seriesID = ref.seriesID {
+                // "Vai alla serie" ha senso solo per le serie tv: aprire la
+                // scheda di un film che è già il contenuto stesso è ridondante.
+                if let seriesID = ref.seriesID,
+                   let s = model.series(seriesID),
+                   !s.isMovie {
                     Button {
                         model.selection = .series(seriesID)
                     } label: {
@@ -831,13 +838,15 @@ struct SeriesDetail: View {
         }
         .frame(maxWidth: .infinity, minHeight: 360, alignment: .bottomLeading)
         .background {
-            Thumbnail(episodeID: series.firstEpisode?.id ?? series.id,
-                      ready: model.thumbReady.contains(series.firstEpisode?.id ?? series.id))
-                .equatable()
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .clipped()
+            ZStack {
+                Thumbnail(episodeID: series.firstEpisode?.id ?? series.id,
+                          ready: model.thumbReady.contains(series.firstEpisode?.id ?? series.id))
+                    .equatable()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
+                Theme.heroOverlay.allowsHitTesting(false)
+            }
         }
-        .overlay { Theme.heroOverlay.allowsHitTesting(false) }
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.xl))
         .overlay(
             RoundedRectangle(cornerRadius: Theme.Radius.xl)
@@ -949,15 +958,17 @@ struct MovieDetail: View {
         }
         .frame(maxWidth: .infinity, minHeight: 380, alignment: .bottomLeading)
         .background {
-            Thumbnail(
-                episodeID: episode?.id ?? series.id,
-                ready: model.thumbReady.contains(episode?.id ?? series.id)
-            )
-            .equatable()
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .clipped()
+            ZStack {
+                Thumbnail(
+                    episodeID: episode?.id ?? series.id,
+                    ready: model.thumbReady.contains(episode?.id ?? series.id)
+                )
+                .equatable()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
+                Theme.heroOverlay.allowsHitTesting(false)
+            }
         }
-        .overlay { Theme.heroOverlay.allowsHitTesting(false) }
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.xl))
         .overlay(
             RoundedRectangle(cornerRadius: Theme.Radius.xl)
