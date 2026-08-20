@@ -292,32 +292,31 @@ private struct HeroBanner: View {
     let ref: EpisodeRef
     @State private var hovering = false
 
-    /// Altezza fissa: abbastanza alta per contenere titolo grande, riga info,
-    /// barra di progresso e due bottoni senza tagli. Prima era 320 e il
-    /// pulsante Riprodici veniva mangiato in fondo.
-    private let bannerHeight: CGFloat = 400
+    /// Altezza minima. Il banner cresce se il contenuto (titolo su due righe,
+    /// più bottoni…) ha bisogno di più spazio, invece di essere clippato.
+    private let bannerMinHeight: CGFloat = 380
 
     var body: some View {
-        ZStack(alignment: .bottomLeading) {
-            // Le nostre thumbnail sono 16:9. Le facciamo "riempire" un frame
-            // di altezza fissa e le clippiamo con l'angolo del container: si
-            // perde la parte alta/bassa ma si mantiene il feel cinematografico
-            // e la vista non esplode più.
+        // VStack + Spacer: il contenuto sta in basso ma se cresce spinge in
+        // alto lo spazio dell'immagine, niente più bottoni tagliati.
+        VStack(alignment: .leading, spacing: 0) {
+            Spacer(minLength: 0)
+            content
+                .padding(.horizontal, Theme.Spacing.xxl)
+                .padding(.bottom, Theme.Spacing.xl)
+                .padding(.top, Theme.Spacing.md)
+        }
+        .frame(maxWidth: .infinity, minHeight: bannerMinHeight, alignment: .bottomLeading)
+        .background {
             Thumbnail(episodeID: ref.episode.id,
                       ready: model.thumbReady.contains(ref.episode.id))
                 .equatable()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .clipped()
-
-            Theme.heroOverlay
-                .allowsHitTesting(false)
-
-            content
-                .padding(.horizontal, Theme.Spacing.xxl)
-                .padding(.vertical, Theme.Spacing.xl)
         }
-        .frame(height: bannerHeight)
-        .frame(maxWidth: .infinity)
+        .overlay {
+            Theme.heroOverlay.allowsHitTesting(false)
+        }
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.xl))
         .overlay(
             RoundedRectangle(cornerRadius: Theme.Radius.xl)
@@ -382,11 +381,8 @@ private struct HeroBanner: View {
                 } label: {
                     Label(ref.episode.started ? "Riprendi" : "Riproduci",
                           systemImage: "play.fill")
-                        .font(.headline)
-                        .padding(.horizontal, 6)
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
+                .buttonStyle(PrimaryButtonStyle())
 
                 if let seriesID = ref.seriesID {
                     Button {
@@ -394,9 +390,7 @@ private struct HeroBanner: View {
                     } label: {
                         Label("Vai alla serie", systemImage: "rectangle.stack")
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.large)
-                    .tint(.white)
+                    .buttonStyle(SecondaryButtonStyle())
                 }
             }
             .padding(.top, Theme.Spacing.xs)
@@ -825,67 +819,71 @@ struct SeriesDetail: View {
     }
 
     private var seriesHero: some View {
-        ZStack(alignment: .bottomLeading) {
+        // Stessa strategia dell'HeroBanner: contenuto in fondo con VStack +
+        // Spacer, altezza minima ma libera di crescere. Così titolo lungo o
+        // bottoni grandi non escono più dal riquadro.
+        VStack(alignment: .leading, spacing: 0) {
+            Spacer(minLength: 0)
+            seriesHeroContent
+                .padding(.horizontal, Theme.Spacing.xxl)
+                .padding(.bottom, Theme.Spacing.xl)
+                .padding(.top, Theme.Spacing.md)
+        }
+        .frame(maxWidth: .infinity, minHeight: 360, alignment: .bottomLeading)
+        .background {
             Thumbnail(episodeID: series.firstEpisode?.id ?? series.id,
                       ready: model.thumbReady.contains(series.firstEpisode?.id ?? series.id))
                 .equatable()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .clipped()
-            Theme.heroOverlay
-                .allowsHitTesting(false)
-
-            VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-                Text("SERIE TV")
-                    .font(.caption2).bold().tracking(2)
-                    .foregroundStyle(Theme.accent)
-
-                Text(series.title)
-                    .font(.system(size: 36, weight: .bold))
-                    .foregroundStyle(.white)
-                    .lineLimit(2)
-                    .shadow(color: .black.opacity(0.5), radius: 6, y: 2)
-
-                Text("\(series.seasons.count) stagion\(series.seasons.count == 1 ? "e" : "i") · \(series.episodeCount) episodi")
-                    .foregroundStyle(Theme.textSecondary)
-                    .font(.callout)
-
-                HStack(spacing: Theme.Spacing.md) {
-                    if let r = resumeTarget {
-                        Button {
-                            model.play(r)
-                        } label: {
-                            Label(r.episode.started
-                                  ? "Riprendi S\(r.seasonNumber)E\(r.episode.number)"
-                                  : "Riproduci S\(r.seasonNumber)E\(r.episode.number)",
-                                  systemImage: "play.fill")
-                                .font(.headline)
-                                .padding(.horizontal, 6)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.large)
-                    }
-                    Button {
-                        model.beginImport(into: series.id, season: seasonNumber)
-                    } label: {
-                        Label("Aggiungi episodi", systemImage: "plus")
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.large)
-                    .tint(.white)
-                }
-            }
-            .frame(maxWidth: 560, alignment: .leading)
-            .padding(.horizontal, Theme.Spacing.xxl)
-            .padding(.vertical, Theme.Spacing.xl)
         }
-        .frame(height: 380)
-        .frame(maxWidth: .infinity)
+        .overlay { Theme.heroOverlay.allowsHitTesting(false) }
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.xl))
         .overlay(
             RoundedRectangle(cornerRadius: Theme.Radius.xl)
                 .strokeBorder(Theme.border, lineWidth: 0.5)
         )
         .shadow(color: .black.opacity(0.3), radius: 18, y: 10)
+    }
+
+    private var seriesHeroContent: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+            Text("SERIE TV")
+                .font(.caption2).bold().tracking(2)
+                .foregroundStyle(Theme.accent)
+
+            Text(series.title)
+                .font(.system(size: 36, weight: .bold))
+                .foregroundStyle(.white)
+                .lineLimit(2)
+                .shadow(color: .black.opacity(0.5), radius: 6, y: 2)
+
+            Text("\(series.seasons.count) stagion\(series.seasons.count == 1 ? "e" : "i") · \(series.episodeCount) episodi")
+                .foregroundStyle(Theme.textSecondary)
+                .font(.callout)
+
+            HStack(spacing: Theme.Spacing.md) {
+                if let r = resumeTarget {
+                    Button {
+                        model.play(r)
+                    } label: {
+                        Label(r.episode.started
+                              ? "Riprendi S\(r.seasonNumber)E\(r.episode.number)"
+                              : "Riproduci S\(r.seasonNumber)E\(r.episode.number)",
+                              systemImage: "play.fill")
+                    }
+                    .buttonStyle(PrimaryButtonStyle())
+                }
+                Button {
+                    model.beginImport(into: series.id, season: seasonNumber)
+                } label: {
+                    Label("Aggiungi episodi", systemImage: "plus")
+                }
+                .buttonStyle(SecondaryButtonStyle())
+            }
+            .padding(.top, Theme.Spacing.xs)
+        }
+        .frame(maxWidth: 640, alignment: .leading)
     }
 }
 
@@ -942,7 +940,15 @@ struct MovieDetail: View {
     }
 
     private var movieHero: some View {
-        ZStack(alignment: .bottomLeading) {
+        VStack(alignment: .leading, spacing: 0) {
+            Spacer(minLength: 0)
+            movieHeroContent
+                .padding(.horizontal, Theme.Spacing.xxl)
+                .padding(.bottom, Theme.Spacing.xl)
+                .padding(.top, Theme.Spacing.md)
+        }
+        .frame(maxWidth: .infinity, minHeight: 380, alignment: .bottomLeading)
+        .background {
             Thumbnail(
                 episodeID: episode?.id ?? series.id,
                 ready: model.thumbReady.contains(episode?.id ?? series.id)
@@ -950,101 +956,91 @@ struct MovieDetail: View {
             .equatable()
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .clipped()
-
-            Theme.heroOverlay
-                .allowsHitTesting(false)
-
-            VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-                Text("FILM")
-                    .font(.caption2).bold().tracking(2)
-                    .foregroundStyle(Theme.accent)
-
-                Text(series.title)
-                    .font(.system(size: 40, weight: .bold))
-                    .foregroundStyle(.white)
-                    .lineLimit(2)
-                    .shadow(color: .black.opacity(0.5), radius: 6, y: 2)
-
-                if let ep = episode {
-                    HStack(spacing: Theme.Spacing.md) {
-                        if ep.duration > 0 {
-                            Label(formatTime(ep.duration), systemImage: "clock")
-                        }
-                        if ep.finished {
-                            Label("Visto", systemImage: "checkmark.seal.fill")
-                                .foregroundStyle(Theme.success)
-                        } else if ep.started {
-                            Label("Restano \(formatTime(ep.remaining))",
-                                  systemImage: "arrow.uturn.forward")
-                                .foregroundStyle(Theme.accent)
-                        }
-                        if ep.missing {
-                            Label("File mancante", systemImage: "exclamationmark.triangle")
-                                .foregroundStyle(Theme.danger)
-                        }
-                        if ep.needsConversion {
-                            Label(".\(ep.url.pathExtension) da convertire",
-                                  systemImage: "wand.and.rays")
-                                .foregroundStyle(Theme.accent)
-                        }
-                    }
-                    .font(.callout).foregroundStyle(Theme.textSecondary)
-
-                    if ep.progress > 0 {
-                        GeometryReader { geo in
-                            ZStack(alignment: .leading) {
-                                Capsule().fill(Color.white.opacity(0.18))
-                                Capsule().fill(Theme.accent)
-                                    .frame(width: geo.size.width * ep.progress)
-                            }
-                        }
-                        .frame(width: 320, height: 4)
-                    }
-
-                    HStack(spacing: Theme.Spacing.md) {
-                        Button {
-                            if let r = ref { model.play(r) }
-                        } label: {
-                            Label(ep.started ? "Riprendi" : "Riproduci",
-                                  systemImage: "play.fill")
-                                .font(.headline)
-                                .padding(.horizontal, 6)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.large)
-                        .disabled(ep.missing)
-
-                        if ep.progress > 0 {
-                            Button {
-                                model.update(ep.id) {
-                                    $0.position = 0
-                                    $0.finished = false
-                                }
-                            } label: {
-                                Label("Ricomincia", systemImage: "backward.end")
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.large)
-                            .tint(.white)
-                        }
-                    }
-                }
-            }
-            .frame(maxWidth: 560, alignment: .leading)
-            .padding(.horizontal, Theme.Spacing.xxl)
-            .padding(.vertical, Theme.Spacing.xl)
         }
-        // Altezza ampia per non tagliare i bottoni in fondo quando ci sono
-        // titolo lungo + info + progress + azioni. Prima era 340 e Riprendi
-        // usciva mezzo dal riquadro.
-        .frame(height: 420)
-        .frame(maxWidth: .infinity)
+        .overlay { Theme.heroOverlay.allowsHitTesting(false) }
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.xl))
         .overlay(
             RoundedRectangle(cornerRadius: Theme.Radius.xl)
                 .strokeBorder(Theme.border, lineWidth: 0.5)
         )
         .shadow(color: .black.opacity(0.3), radius: 18, y: 10)
+    }
+
+    private var movieHeroContent: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+            Text("FILM")
+                .font(.caption2).bold().tracking(2)
+                .foregroundStyle(Theme.accent)
+
+            Text(series.title)
+                .font(.system(size: 40, weight: .bold))
+                .foregroundStyle(.white)
+                .lineLimit(2)
+                .shadow(color: .black.opacity(0.5), radius: 6, y: 2)
+
+            if let ep = episode {
+                HStack(spacing: Theme.Spacing.md) {
+                    if ep.duration > 0 {
+                        Label(formatTime(ep.duration), systemImage: "clock")
+                    }
+                    if ep.finished {
+                        Label("Visto", systemImage: "checkmark.seal.fill")
+                            .foregroundStyle(Theme.success)
+                    } else if ep.started {
+                        Label("Restano \(formatTime(ep.remaining))",
+                              systemImage: "arrow.uturn.forward")
+                            .foregroundStyle(Theme.accent)
+                    }
+                    if ep.missing {
+                        Label("File mancante", systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(Theme.danger)
+                    }
+                    if ep.needsConversion {
+                        Label(".\(ep.url.pathExtension) da convertire",
+                              systemImage: "wand.and.rays")
+                            .foregroundStyle(Theme.accent)
+                    }
+                }
+                .font(.callout).foregroundStyle(Theme.textSecondary)
+
+                if ep.progress > 0 {
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(Color.white.opacity(0.18))
+                            Capsule().fill(Theme.accent)
+                                .frame(width: geo.size.width * ep.progress)
+                        }
+                    }
+                    .frame(width: 320, height: 4)
+                }
+
+                HStack(spacing: Theme.Spacing.md) {
+                    Button {
+                        if let r = ref { model.play(r) }
+                    } label: {
+                        Label(ep.started ? "Riprendi" : "Riproduci",
+                              systemImage: "play.fill")
+                    }
+                    .buttonStyle(PrimaryButtonStyle())
+                    .disabled(ep.missing)
+                    .opacity(ep.missing ? 0.5 : 1)
+
+                    if ep.progress > 0 {
+                        Button {
+                            model.update(ep.id) {
+                                $0.position = 0
+                                $0.finished = false
+                            }
+                        } label: {
+                            Label("Ricomincia", systemImage: "backward.end")
+                        }
+                        .buttonStyle(SecondaryButtonStyle())
+                    }
+                }
+                .padding(.top, Theme.Spacing.xs)
+            }
+        }
+        .frame(maxWidth: 640, alignment: .leading)
     }
 }
 

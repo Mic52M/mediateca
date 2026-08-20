@@ -89,20 +89,14 @@ enum Theme {
 
 /// Azione principale: pillola piena in accent con testo scuro. L'arancio è
 /// chiaro, quindi il nero dà molto più contrasto del bianco.
+///
+/// `ButtonStyle` non ammette `@State` diretto: hover e animazioni li teniamo
+/// dentro una vista interna che avvolge la label.
 struct PrimaryButtonStyle: ButtonStyle {
     var compact = false
 
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(compact ? .callout.bold() : .headline)
-            .foregroundStyle(Color.black.opacity(0.88))
-            .padding(.horizontal, compact ? 16 : 22)
-            .padding(.vertical, compact ? 8 : 12)
-            .background(
-                Capsule().fill(Theme.accent.opacity(configuration.isPressed ? 0.75 : 1))
-            )
-            .contentShape(Capsule())
-            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+        InteractiveLabel(configuration: configuration, compact: compact, primary: true)
     }
 }
 
@@ -111,16 +105,57 @@ struct SecondaryButtonStyle: ButtonStyle {
     var compact = false
 
     func makeBody(configuration: Configuration) -> some View {
+        InteractiveLabel(configuration: configuration, compact: compact, primary: false)
+    }
+}
+
+private struct InteractiveLabel: View {
+    let configuration: ButtonStyle.Configuration
+    let compact: Bool
+    let primary: Bool
+    @State private var hovering = false
+
+    var body: some View {
         configuration.label
-            .font(compact ? .callout : .headline)
-            .foregroundStyle(Theme.text)
+            .font(compact ? .callout.bold() : .headline)
+            .foregroundStyle(primary ? Color.black.opacity(0.88) : Theme.text)
             .padding(.horizontal, compact ? 16 : 22)
             .padding(.vertical, compact ? 8 : 12)
-            .background(
-                Capsule().fill(Color.white.opacity(configuration.isPressed ? 0.16 : 0.08))
+            .background(background)
+            .overlay(border)
+            .scaleEffect(configuration.isPressed ? 0.96 : (hovering ? 1.04 : 1.0))
+            .shadow(
+                color: primary ? Theme.accent.opacity(hovering ? 0.45 : 0) : .clear,
+                radius: hovering ? 14 : 0,
+                y: hovering ? 6 : 0
             )
-            .overlay(Capsule().strokeBorder(Theme.borderStrong, lineWidth: 0.5))
             .contentShape(Capsule())
+            .onHover { hovering = $0 }
+            .animation(.spring(response: 0.24, dampingFraction: 0.72), value: hovering)
+            .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
+    }
+
+    @ViewBuilder
+    private var background: some View {
+        if primary {
+            Capsule().fill(Theme.accent.opacity(
+                configuration.isPressed ? 0.75 : (hovering ? 1.0 : 0.95)
+            ))
+        } else {
+            Capsule().fill(Color.white.opacity(
+                configuration.isPressed ? 0.20 : (hovering ? 0.16 : 0.08)
+            ))
+        }
+    }
+
+    @ViewBuilder
+    private var border: some View {
+        if !primary {
+            Capsule().strokeBorder(
+                hovering ? Color.white.opacity(0.35) : Theme.borderStrong,
+                lineWidth: 0.5
+            )
+        }
     }
 }
 
