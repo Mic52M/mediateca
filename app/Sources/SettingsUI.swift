@@ -84,59 +84,230 @@ struct SettingsScreen: View {
 private struct DomainsTable: View {
     @ObservedObject var bridge: VibraVidBridge
     @State private var filter = ""
-
-    var filtered: [VibraVidBridge.DomainEntry.ID] {
-        let q = filter.lowercased()
-        return bridge.domains
-            .filter { q.isEmpty || $0.key.lowercased().contains(q) || $0.fullURL.lowercased().contains(q) }
-            .map(\.id)
-    }
+    @State private var showAddSheet = false
+    @State private var pendingDeleteID: VibraVidBridge.DomainEntry.ID?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.md) {
             HStack {
                 TextField("Filtra per nome sito o URL", text: $filter)
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: 320)
                 Spacer()
+                Button {
+                    showAddSheet = true
+                } label: {
+                    Label("Aggiungi sito", systemImage: "plus")
+                }
+                .buttonStyle(SecondaryButtonStyle(compact: true))
+
                 Button("Salva modifiche") { bridge.saveDomains() }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(PrimaryButtonStyle(compact: true))
             }
 
-            Text("Modifica dominio e URL completo quando un sito cambia indirizzo. "
-               + "Le modifiche entrano in vigore al prossimo avvio di un download.")
-                .font(.callout).foregroundStyle(.secondary)
+            if bridge.domains.isEmpty {
+                emptyState
+            } else {
+                Text("Modifica dominio e URL completo quando un sito cambia indirizzo. "
+                   + "Le modifiche entrano in vigore al prossimo download.")
+                    .font(.callout).foregroundStyle(.secondary)
 
-            Table($bridge.domains) {
-                TableColumn("Sito") { entry in
-                    Text(entry.wrappedValue.key)
-                        .font(.callout).bold()
-                }
-                .width(min: 140, ideal: 170)
-
-                TableColumn("Dominio") { entry in
-                    TextField("es. eu", text: entry.domain)
-                        .textFieldStyle(.roundedBorder)
-                }
-                .width(min: 90, ideal: 110)
-
-                TableColumn("URL completo") { entry in
-                    TextField("https://sito.tld/", text: entry.fullURL)
-                        .textFieldStyle(.roundedBorder)
-                }
-
-                TableColumn("Ultimo status") { entry in
-                    if let s = entry.wrappedValue.lastStatus {
-                        Text("\(s)")
-                            .foregroundStyle(s == 200 ? .green : .orange)
-                            .monospacedDigit()
-                    } else {
-                        Text("—").foregroundStyle(.secondary)
+                Table($bridge.domains) {
+                    TableColumn("Sito") { entry in
+                        Text(entry.wrappedValue.key)
+                            .font(.callout).bold()
                     }
+                    .width(min: 140, ideal: 170)
+
+                    TableColumn("Dominio") { entry in
+                        TextField("es. eu", text: entry.domain)
+                            .textFieldStyle(.roundedBorder)
+                    }
+                    .width(min: 90, ideal: 110)
+
+                    TableColumn("URL completo") { entry in
+                        TextField("https://sito.tld/", text: entry.fullURL)
+                            .textFieldStyle(.roundedBorder)
+                    }
+
+                    TableColumn("Stato") { entry in
+                        if let s = entry.wrappedValue.lastStatus {
+                            Text("\(s)")
+                                .foregroundStyle(s == 200 ? .green : .orange)
+                                .monospacedDigit()
+                        } else {
+                            Text("—").foregroundStyle(.secondary)
+                        }
+                    }
+                    .width(min: 60, ideal: 70)
+
+                    TableColumn("") { entry in
+                        Button {
+                            pendingDeleteID = entry.wrappedValue.id
+                        } label: {
+                            Image(systemName: "trash")
+                                .foregroundStyle(Theme.danger)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Rimuovi questo sito")
+                    }
+                    .width(30)
                 }
-                .width(min: 90, ideal: 100)
+                .frame(minHeight: 420)
             }
-            .frame(minHeight: 460)
+        }
+        .sheet(isPresented: $showAddSheet) {
+            AddDomainSheet(bridge: bridge)
+        }
+        .alert("Rimuovere questo sito?", isPresented: Binding(
+            get: { pendingDeleteID != nil },
+            set: { if !$0 { pendingDeleteID = nil } }
+        )) {
+            Button("Rimuovi", role: .destructive) {
+                if let id = pendingDeleteID { bridge.removeDomain(id: id) }
+                pendingDeleteID = nil
+            }
+            Button("Annulla", role: .cancel) { pendingDeleteID = nil }
+        } message: {
+            Text("La voce sparisce da questa tabella e dal file di configurazione.")
+        }
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: Theme.Spacing.md) {
+            Image(systemName: "globe.badge.chevron.backward")
+                .font(.system(size: 34))
+                .foregroundStyle(Theme.accent.opacity(0.7))
+            Text("Nessun sito configurato")
+                .font(.headline)
+                .foregroundStyle(Theme.text)
+            Text("VibraVid non ha ancora scaricato l'elenco dei siti. "
+               + "Fai un primo download da “Scarica” e la lista si popola da sola, "
+               + "oppure aggiungi manualmente un sito qui.")
+                .font(.callout)
+                .foregroundStyle(Theme.textSecondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 420)
+            Button {
+                showAddSheet = true
+            } label: {
+                Label("Aggiungi il primo sito", systemImage: "plus")
+            }
+            .buttonStyle(PrimaryButtonStyle())
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 40)
+    }
+}
+
+private struct AddDomainSheet: View {
+    @ObservedObject var bridge: VibraVidBridge
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+
+    /// Suggerimenti: i siti supportati dai provider di VibraVid che non
+    /// sono ancora nella lista dei domini. Chi non sa cosa scrivere può
+    /// prenderne uno con un click.
+    private var suggestions: [String] {
+        let existing = Set(bridge.domains.map(\.key))
+        return bridge.providers
+            .map(\.name)
+            .filter { !existing.contains($0.lowercased()) }
+            .sorted()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+            Text("Aggiungi un sito")
+                .font(.title3).bold()
+                .foregroundStyle(Theme.text)
+
+            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                Text("NOME DEL SITO")
+                    .font(.caption2).bold().tracking(1.2)
+                    .foregroundStyle(Theme.textSecondary)
+                TextField("es. streamingcommunity", text: $name)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit(confirm)
+                Text("Deve corrispondere al nome di un provider di VibraVid.")
+                    .font(.caption).foregroundStyle(Theme.textTertiary)
+            }
+
+            if !suggestions.isEmpty {
+                VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                    Text("SITI DISPONIBILI")
+                        .font(.caption2).bold().tracking(1.2)
+                        .foregroundStyle(Theme.textSecondary)
+                    ScrollView {
+                        FlowLayout(spacing: 6) {
+                            ForEach(suggestions, id: \.self) { s in
+                                Button {
+                                    name = s
+                                } label: {
+                                    Text(s)
+                                        .font(.caption)
+                                        .padding(.horizontal, 10).padding(.vertical, 5)
+                                        .background(Theme.surfaceElevated, in: Capsule())
+                                        .overlay(Capsule().strokeBorder(Theme.border, lineWidth: 0.5))
+                                        .foregroundStyle(Theme.text)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 140)
+                }
+            }
+
+            HStack {
+                Button("Annulla") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                    .buttonStyle(SecondaryButtonStyle(compact: true))
+                Spacer()
+                Button("Aggiungi") { confirm() }
+                    .buttonStyle(PrimaryButtonStyle(compact: true))
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .padding(Theme.Spacing.xl)
+        .frame(width: 460)
+    }
+
+    private func confirm() {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        bridge.addDomain(name: trimmed)
+        dismiss()
+    }
+}
+
+/// Layout tag "a flusso" (wrap alla fine della riga). SwiftUI non ne ha
+/// uno built-in su macOS 14, quindi ci pensiamo noi.
+private struct FlowLayout: Layout {
+    var spacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? .infinity
+        var x: CGFloat = 0, y: CGFloat = 0, rowHeight: CGFloat = 0
+        for sub in subviews {
+            let s = sub.sizeThatFits(.unspecified)
+            if x + s.width > width { x = 0; y += rowHeight + spacing; rowHeight = 0 }
+            x += s.width + spacing
+            rowHeight = max(rowHeight, s.height)
+        }
+        return CGSize(width: width, height: y + rowHeight)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize,
+                       subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX, y = bounds.minY, rowHeight: CGFloat = 0
+        for sub in subviews {
+            let s = sub.sizeThatFits(.unspecified)
+            if x + s.width > bounds.maxX { x = bounds.minX; y += rowHeight + spacing; rowHeight = 0 }
+            sub.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(s))
+            x += s.width + spacing
+            rowHeight = max(rowHeight, s.height)
         }
     }
 }

@@ -78,6 +78,17 @@ VIBRAVID_REPO="https://github.com/Mic52M/VibraVid.git"
 echo
 if [ -d "$VIBRAVID_DIR/.git" ]; then
     green "✓ VibraVid già presente in $VIBRAVID_DIR"
+    # Aggiorniamo silenziosamente: se il fork ha nuovi commit (ad es. seed
+    # dei domini o correzioni), l'utente li riceve senza doverli tirare a mano.
+    # Se ci sono modifiche locali non committate lasciamo perdere, per non
+    # rovinare eventuali personalizzazioni.
+    if [ -z "$(git -C "$VIBRAVID_DIR" status --porcelain 2>/dev/null)" ]; then
+        git -C "$VIBRAVID_DIR" pull --quiet --ff-only 2>/dev/null \
+            && green "  aggiornato all'ultima versione" \
+            || yellow "  aggiornamento saltato (pull non fast-forward)"
+    else
+        yellow "  ci sono modifiche locali non committate: aggiornamento saltato"
+    fi
     if [ -x "$VIBRAVID_DIR/venv/bin/python" ]; then
         green "  venv Python già configurato"
     fi

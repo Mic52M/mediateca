@@ -166,6 +166,29 @@ final class VibraVidBridge: ObservableObject {
 
     /// Riscrive il file domains.json a partire dalla tabella in memoria,
     /// preservando i campi che l'UI non modifica (es. `old_domain`).
+    /// Aggiunge una riga vuota alla tabella dei domini. L'utente digita
+    /// nome, dominio e URL, poi salva. Se il nome è duplicato non facciamo
+    /// nulla (la voce esiste già e verrebbe sovrascritta dal save).
+    func addDomain(name: String) {
+        let key = name.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !key.isEmpty else { return }
+        guard !domains.contains(where: { $0.key == key }) else { return }
+        domains.append(DomainEntry(key: key, domain: "", fullURL: "https://"))
+        domains.sort { $0.key < $1.key }
+    }
+
+    /// Rimuove una voce sia dalla lista in memoria che dal file al prossimo
+    /// save. Serve un save() esplicito per persistere.
+    func removeDomain(id: DomainEntry.ID) {
+        domains.removeAll { $0.id == id }
+        // Rimozione atomica: riscrivo domains.json senza quella chiave.
+        var raw: [String: [String: Any]] =
+            (try? JSONSerialization.jsonObject(with: (try? Data(contentsOf: domainsFile)) ?? Data())
+                as? [String: [String: Any]]) ?? [:]
+        raw = raw.filter { key, _ in domains.contains(where: { $0.key == key }) }
+        writeJSON(raw, to: domainsFile)
+    }
+
     func saveDomains() {
         var raw: [String: [String: Any]] =
             (try? JSONSerialization.jsonObject(with: (try? Data(contentsOf: domainsFile)) ?? Data())
