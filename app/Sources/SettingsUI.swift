@@ -8,6 +8,7 @@ struct SettingsScreen: View {
     @ObservedObject var bridge: VibraVidBridge
 
     enum Tab: String, CaseIterable, Identifiable {
+        case update = "Aggiornamento"
         case domains = "Domini"
         case download = "Download"
         case account = "Account"
@@ -15,7 +16,8 @@ struct SettingsScreen: View {
         var id: String { rawValue }
     }
 
-    @State private var tab: Tab = .domains
+    @State private var tab: Tab = .update
+    @StateObject private var updater = Updater()
 
     init(bridge: VibraVidBridge) { self.bridge = bridge }
 
@@ -47,6 +49,7 @@ struct SettingsScreen: View {
             ScrollView {
                 Group {
                     switch tab {
+                    case .update:   UpdatePanel(updater: updater)
                     case .domains:  DomainsTable(bridge: bridge)
                     case .download: DownloadPreferences(bridge: bridge)
                     case .account:  LoginEditor(bridge: bridge)
@@ -54,6 +57,13 @@ struct SettingsScreen: View {
                     }
                 }
                 .padding(Theme.Spacing.xl)
+            }
+            .onAppear {
+                // Al primo ingresso in Impostazioni facciamo una verifica
+                // silenziosa così l'utente sa subito se c'è un update.
+                if updater.phase == .idle, updater.isConfigured {
+                    updater.check()
+                }
             }
         }
         .themedBackground()
@@ -424,6 +434,170 @@ private struct InstallLocation: View {
         }
         .fileImporter(isPresented: $picker, allowedContentTypes: [.folder]) { result in
             if case .success(let url) = result { bridge.installDir = url }
+        }
+    }
+}
+
+// MARK: - Pannello Aggiornamento
+
+private struct UpdatePanel: View {
+    @ObservedObject var updater: Updater
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
+            header
+            statusCard
+
+            if !updater.log.isEmpty {
+                DisclosureGroup("Dettagli tecnici") {
+                    ScrollView {
+                        Text(updater.log)
+                            .font(.system(size: 11, design: .monospaced))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                            .padding(Theme.Spacing.md)
+                    }
+                    .frame(maxHeight: 240)
+                    .background(Theme.surfaceElevated,
+                                in: RoundedRectangle(cornerRadius: Theme.Radius.sm))
+                }
+                .tint(Theme.accent)
+            }
+        }
+    }
+
+    // MARK: header e status
+
+    private var header: some View {
+        HStack(alignment: .top, spacing: Theme.Spacing.md) {
+            Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
+                .font(.system(size: 30))
+                .foregroundStyle(Theme.accent)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Mantieni Mediateca aggiornata")
+                    .font(.title3).bold()
+                    .foregroundStyle(Theme.text)
+                Text("Le novità arrivano direttamente dalla repository su GitHub.")
+                    .font(.callout)
+                    .foregroundStyle(Theme.textSecondary)
+            }
+            Spacer()
+        }
+    }
+
+    @ViewBuilder
+    private var statusCard: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+            switch updater.phase {
+            case .idle:
+                content(icon: "questionmark.circle",
+                        color: Theme.textSecondary,
+                        title: "Non ho ancora controllato",
+                        detail: "Clicca “Verifica aggiornamenti” per vedere se c'è una nuova versione.")
+                actions {
+                    Button("Verifica aggiornamenti") { updater.check() }
+                        .buttonStyle(PrimaryButtonStyle())
+                        .disabled(!updater.isConfigured)
+                }
+
+            case .checking:
+                content(icon: "arrow.triangle.2.circlepath",
+                        color: Theme.accent,
+                        title: "Sto controllando…",
+                        detail: "Interrogo GitHub per vedere se ci sono commit nuovi.")
+
+            case .upToDate(let sha, let when):
+                content(icon: "checkmark.seal.fill",
+                        color: Theme.success,
+                        title: "Sei aggiornata",
+                        detail: "Versione \(sha) · installata \(when).")
+                actions {
+                    Button("Ricontrolla") { updater.check() }
+                        .buttonStyle(SecondaryButtonStyle(compact: true))
+                }
+
+            case .updateAvailable(let commits, let sha, let message):
+                content(icon: "sparkles",
+                        color: Theme.accent,
+                        title: commits == 1
+                            ? "Nuova versione disponibile"
+                            : "\(commits) aggiornamenti disponibili",
+                        detail: "\(sha) — “\(message)”")
+                actions {
+                    Button {
+                        updater.installUpdate()
+                    } label: {
+                        Label("Aggiorna adesso", systemImage: "arrow.down.circle.fill")
+                    }
+                    .buttonStyle(PrimaryButtonStyle())
+
+                    Button("Ricontrolla") { updater.check() }
+                        .buttonStyle(SecondaryButtonStyle(compact: true))
+                }
+
+            case .updating(let progress):
+                content(icon: "arrow.triangle.2.circlepath",
+                        color: Theme.accent,
+                        title: "Aggiornamento in corso",
+                        detail: progress)
+                HStack { ProgressView().controlSize(.small); Spacer() }
+
+            case .ready:
+                content(icon: "checkmark.seal.fill",
+                        color: Theme.success,
+                        title: "Aggiornamento pronto",
+                        detail: "Serve un riavvio per attivarlo. Ci vogliono due secondi.")
+                actions {
+                    Button {
+                        updater.restart()
+                    } label: {
+                        Label("Riavvia Mediateca", systemImage: "power")
+                    }
+                    .buttonStyle(PrimaryButtonStyle())
+                }
+
+            case .failed(let msg):
+                content(icon: "exclamationmark.triangle.fill",
+                        color: Theme.danger,
+                        title: "Aggiornamento non riuscito",
+                        detail: msg)
+                actions {
+                    Button("Riprova") { updater.check() }
+                        .buttonStyle(SecondaryButtonStyle(compact: true))
+                }
+            }
+        }
+        .padding(Theme.Spacing.lg)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.lg))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.Radius.lg)
+                .strokeBorder(Theme.border, lineWidth: 0.5)
+        )
+    }
+
+    private func content(icon: String, color: Color, title: String, detail: String) -> some View {
+        HStack(alignment: .top, spacing: Theme.Spacing.md) {
+            Image(systemName: icon)
+                .font(.system(size: 22))
+                .foregroundStyle(color)
+                .frame(width: 30)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.headline)
+                    .foregroundStyle(Theme.text)
+                Text(detail)
+                    .font(.callout)
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
+        }
+    }
+
+    private func actions<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        HStack(spacing: Theme.Spacing.md) {
+            content()
+            Spacer()
         }
     }
 }

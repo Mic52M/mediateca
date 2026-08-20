@@ -10,23 +10,42 @@ ma con file propri.
 ## Requisiti
 
 - macOS 14 o successivo (Apple Silicon)
-- Xcode / toolchain Swift (per compilare)
-- [ffmpeg](https://ffmpeg.org) per la conversione e la generazione delle durate
-  dei formati non nativi:
+- [Homebrew](https://brew.sh) (per installare ffmpeg)
+- [Xcode Command Line Tools](https://developer.apple.com/download/all/?q=command%20line%20tools)
+  (contengono `swiftc`, servono a compilare)
 
-  ```
-  brew install ffmpeg
-  ```
+Se manca qualcosa, `install.sh` te lo dice e ti aiuta a metterlo a posto.
 
-## Compilazione
+## Installazione (comando unico)
+
+Dopo aver clonato la repo:
+
+```
+bash install.sh
+```
+
+Lo script verifica ffmpeg e i Command Line Tools, compila l'app e la
+installa in `~/Applications/Mediateca.app`, poi la apre. È idempotente:
+puoi rilanciarlo tutte le volte che vuoi.
+
+## Aggiornamenti
+
+Dentro l'app: **Impostazioni → Aggiornamento**. Un click su "Verifica
+aggiornamenti" controlla se ci sono commit nuovi sulla repo, e "Aggiorna
+adesso" fa `git pull`, ricompila e propone il riavvio.
+
+In alternativa, dallo stesso terminale della repo:
+
+```
+bash install.sh
+```
+
+## Compilazione manuale
 
 ```
 cd app
 ./build.sh
 ```
-
-Lo script compila l'app, genera l'icona, la firma in modalità ad-hoc e la
-installa in `~/Applications/Mediateca.app`.
 
 ## Come funziona
 

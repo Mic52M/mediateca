@@ -42,6 +42,15 @@ mkdir -p "$DEST"
 rm -rf "$DEST/Mediateca.app"
 ditto "$APP" "$DEST/Mediateca.app"
 
+# Traccia della repo dentro il bundle: serve al pulsante "Aggiorna"
+# dell'app per sapere dove tirare gli aggiornamenti (git pull).
+REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+printf '%s\n' "$REPO_DIR" > "$DEST/Mediateca.app/Contents/Resources/repo_path"
+
+# Ri-firma dopo aver toccato Resources: senza questo Gatekeeper può
+# bloccare il rilancio con "codice modificato".
+codesign --force --sign - "$DEST/Mediateca.app" >/dev/null 2>&1 || true
+
 echo "▸ registrazione presso il Finder"
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
   -f "$DEST/Mediateca.app" 2>/dev/null || true
