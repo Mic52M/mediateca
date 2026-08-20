@@ -70,7 +70,10 @@ fi
 # È una repo Python separata. La cloniamo in ~/Documents/VibraVid (path che
 # l'app cerca di default) e installiamo le dipendenze in un venv locale.
 VIBRAVID_DIR="$HOME/Documents/VibraVid"
-VIBRAVID_REPO="https://github.com/AstraeLabs/VibraVid.git"
+# Fork privato con il preset di lingua integrato. Se sostituisci l'URL
+# assicurati che la repo contenga cli/command/track_preset.py, altrimenti
+# il pannello Scarica non passa più il flag --tracks.
+VIBRAVID_REPO="https://github.com/Mic52M/VibraVid.git"
 
 echo
 if [ -d "$VIBRAVID_DIR/.git" ]; then
