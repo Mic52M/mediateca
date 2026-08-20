@@ -292,10 +292,10 @@ private struct HeroBanner: View {
     let ref: EpisodeRef
     @State private var hovering = false
 
-    /// Altezza fissa: senza questa un aspectRatio 21:9 su finestre larghe
-    /// portava l'hero oltre i 500 pt, coprendo mezza schermata e mangiando
-    /// spazio alle righe sotto.
-    private let bannerHeight: CGFloat = 320
+    /// Altezza fissa: abbastanza alta per contenere titolo grande, riga info,
+    /// barra di progresso e due bottoni senza tagli. Prima era 320 e il
+    /// pulsante Riprodici veniva mangiato in fondo.
+    private let bannerHeight: CGFloat = 400
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
@@ -313,7 +313,8 @@ private struct HeroBanner: View {
                 .allowsHitTesting(false)
 
             content
-                .padding(Theme.Spacing.xxl)
+                .padding(.horizontal, Theme.Spacing.xxl)
+                .padding(.vertical, Theme.Spacing.xl)
         }
         .frame(height: bannerHeight)
         .frame(maxWidth: .infinity)
@@ -874,9 +875,10 @@ struct SeriesDetail: View {
                 }
             }
             .frame(maxWidth: 560, alignment: .leading)
-            .padding(Theme.Spacing.xxl)
+            .padding(.horizontal, Theme.Spacing.xxl)
+            .padding(.vertical, Theme.Spacing.xl)
         }
-        .frame(height: 300)
+        .frame(height: 380)
         .frame(maxWidth: .infinity)
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.xl))
         .overlay(
@@ -1029,9 +1031,13 @@ struct MovieDetail: View {
                 }
             }
             .frame(maxWidth: 560, alignment: .leading)
-            .padding(Theme.Spacing.xxl)
+            .padding(.horizontal, Theme.Spacing.xxl)
+            .padding(.vertical, Theme.Spacing.xl)
         }
-        .frame(height: 340)
+        // Altezza ampia per non tagliare i bottoni in fondo quando ci sono
+        // titolo lungo + info + progress + azioni. Prima era 340 e Riprendi
+        // usciva mezzo dal riquadro.
+        .frame(height: 420)
         .frame(maxWidth: .infinity)
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.xl))
         .overlay(

@@ -89,7 +89,7 @@ struct DownloadScreen: View {
         switch stage {
         case .form:
             ScrollView {
-                VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+                VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
                     Picker("", selection: $mode) {
                         ForEach(Mode.allCases) { m in Text(m.rawValue).tag(m) }
                     }
@@ -103,6 +103,10 @@ struct DownloadScreen: View {
                     }
                 }
                 .padding(.horizontal, Theme.Spacing.xl)
+                // Padding sopra per staccare dal divisore dell'indicatore
+                // dei passi e sotto per non fare sbattere il contenuto contro
+                // la sezione "Dettagli tecnici".
+                .padding(.top, Theme.Spacing.xl)
                 .padding(.bottom, Theme.Spacing.xl)
             }
 
@@ -262,14 +266,23 @@ private struct SearchForm: View {
     @State private var trackPreset: String = ""
     @State private var target = DestinationChoice()
 
+    // Preset di VibraVid (Conf/track_preset.py): audio × sottotitoli.
+    //  1=dub          (solo audio italiano)
+    //  2=dub-ita      (audio italiano + sottotitoli italiani)
+    //  5=org          (solo lingua originale, niente sottotitoli)
+    //  6=org-ita      (originale + sottotitoli italiani) — il classico "sub-ita"
+    //  7=org-eng      (originale + sottotitoli inglesi)
+    //  9=multi        (tutte le tracce audio, niente sottotitoli)
+    // 12=multi-all    (tutte le tracce audio + tutti i sottotitoli)
     private let presets: [(key: String, label: String)] = [
         ("",   "Come da impostazioni"),
-        ("2",  "Doppiaggio italiano"),
+        ("1",  "🇮🇹  Solo audio italiano"),
+        ("2",  "🇮🇹  Italiano (audio + sottotitoli)"),
         ("6",  "Originale + sottotitoli italiani"),
-        ("10", "Italiano: audio + sottotitoli"),
-        ("3",  "Doppiaggio inglese"),
         ("5",  "Solo lingua originale"),
-        ("12", "Tutte le lingue disponibili"),
+        ("7",  "Originale + sottotitoli inglesi"),
+        ("9",  "Tutte le tracce audio"),
+        ("12", "Tutto (audio + sottotitoli)"),
     ]
 
     var body: some View {
@@ -300,11 +313,18 @@ private struct SearchForm: View {
                     .frame(width: 260)
                 }
                 field("Lingua preferita") {
-                    Picker("", selection: $trackPreset) {
-                        ForEach(presets, id: \.key) { p in Text(p.label).tag(p.key) }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Picker("", selection: $trackPreset) {
+                            ForEach(presets, id: \.key) { p in Text(p.label).tag(p.key) }
+                        }
+                        .labelsHidden()
+                        .frame(width: 320)
+                        Text("Se la traccia scelta non c'è, VibraVid usa la migliore alternativa disponibile.")
+                            .font(.caption2)
+                            .foregroundStyle(Theme.textTertiary)
+                            .frame(maxWidth: 320, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    .labelsHidden()
-                    .frame(width: 280)
                 }
             }
 
