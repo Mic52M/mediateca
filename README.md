@@ -24,9 +24,17 @@ Dopo aver clonato la repo:
 bash install.sh
 ```
 
-Lo script verifica ffmpeg e i Command Line Tools, compila l'app e la
-installa in `~/Applications/Mediateca.app`, poi la apre. È idempotente:
-puoi rilanciarlo tutte le volte che vuoi.
+Lo script fa tutto in fila:
+
+1. verifica **ffmpeg** (con Homebrew se disponibile)
+2. verifica gli **Xcode Command Line Tools** (`swiftc`)
+3. clona **VibraVid** in `~/Documents/VibraVid` e prepara il suo venv
+   Python — è il motore del pannello "Scarica" nell'app
+4. compila Mediateca e la installa in `~/Applications/Mediateca.app`
+5. apre l'app
+
+È idempotente: puoi rilanciarlo tutte le volte che vuoi. Se una parte
+è già a posto la salta.
 
 ## Aggiornamenti
 
