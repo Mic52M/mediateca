@@ -112,6 +112,9 @@ if [ ! -x "$VIBRAVID_DIR/venv/bin/python" ]; then
     python3 -m venv "$VIBRAVID_DIR/venv"
     "$VIBRAVID_DIR/venv/bin/pip" install --quiet --upgrade pip
     "$VIBRAVID_DIR/venv/bin/pip" install --quiet -r "$VIBRAVID_DIR/requirements.txt"
+    # curl_cffi >= 0.15 non si importa con Python di conda/pyenv su macOS
+    # (symbol not found '_CFRelease'): si blocca alla 0.14.
+    "$VIBRAVID_DIR/venv/bin/pip" install --quiet "curl_cffi<0.15"
     green "✓ VibraVid pronto"
 fi
 
