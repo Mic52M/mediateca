@@ -5,8 +5,9 @@
 # Cosa fa, in ordine:
 #   1. verifica ffmpeg (indispensabile per riprodurre e convertire i video)
 #   2. verifica gli Xcode Command Line Tools (indispensabili per compilare)
-#   3. clona VibraVid in ~/Documents/VibraVid e prepara il venv Python
-#      (motore di download della funzione "Scarica" nell'app)
+#   3. installa o aggiorna VibraVid in ~/Documents/VibraVid (alla versione
+#      provata con questa app) e prepara il suo ambiente Python: è il
+#      motore di download della funzione "Scarica"
 #   4. compila l'app e la installa in ~/Applications/Mediateca.app
 #   5. memorizza dentro il bundle il percorso di questa repo, così il
 #      pulsante "Aggiorna" dentro l'app sa dove tirare gli aggiornamenti
@@ -67,55 +68,87 @@ else
 fi
 
 # ── 3. VibraVid: motore di download online ──────────────────────────────
-# È una repo Python separata. La cloniamo in ~/Documents/VibraVid (path che
-# l'app cerca di default) e installiamo le dipendenze in un venv locale.
-VIBRAVID_DIR="$HOME/Documents/VibraVid"
-# Fork privato con il preset di lingua integrato. Se sostituisci l'URL
-# assicurati che la repo contenga cli/command/track_preset.py, altrimenti
-# il pannello Scarica non passa più il flag --tracks.
-VIBRAVID_REPO="https://github.com/Mic52M/VibraVid.git"
+# Repo Python separata, clonata in ~/Documents/VibraVid (il percorso che l'app
+# cerca di default). Si usa il progetto originale, bloccato alla versione con
+# cui Mediateca è stata provata: una versione più recente potrebbe cambiare
+# l'output che l'app legge. Per passare a una più nuova si cambia VIBRAVID_COMMIT.
+VIBRAVID_DIR="${VIBRAVID_DIR:-$HOME/Documents/VibraVid}"
+VIBRAVID_REPO="https://github.com/AstraeLabs/VibraVid.git"
+VIBRAVID_COMMIT="ed6282fb013436d7326f0fbb4a5c045c5614fd29"   # v1.5.0, 2026-11-10
+
+# Porta la cartella di VibraVid esattamente al commit indicato. I file di
+# configurazione dell'utente (Conf/config.toml, Conf/login.toml) sono tracciati
+# da git: li mettiamo da parte e li rimettiamo, così le sue impostazioni restano.
+vibravid_checkout() {
+    local tmp; tmp="$(mktemp -d)"
+    cp "$VIBRAVID_DIR/Conf/config.toml" "$VIBRAVID_DIR/Conf/login.toml" "$tmp/" 2>/dev/null || true
+    git -C "$VIBRAVID_DIR" fetch --quiet --depth 1 "$VIBRAVID_REPO" "$VIBRAVID_COMMIT"
+    git -C "$VIBRAVID_DIR" checkout --quiet --force -B main FETCH_HEAD
+    for f in config.toml login.toml; do
+        [ -f "$tmp/$f" ] && cp "$tmp/$f" "$VIBRAVID_DIR/Conf/$f"
+    done
+    rm -rf "$tmp"
+}
 
 echo
-if [ -d "$VIBRAVID_DIR/.git" ]; then
-    green "✓ VibraVid già presente in $VIBRAVID_DIR"
-    # Aggiorniamo silenziosamente: se il fork ha nuovi commit (ad es. seed
-    # dei domini o correzioni), l'utente li riceve senza doverli tirare a mano.
-    # Se ci sono modifiche locali non committate lasciamo perdere, per non
-    # rovinare eventuali personalizzazioni.
-    if [ -z "$(git -C "$VIBRAVID_DIR" status --porcelain 2>/dev/null)" ]; then
-        git -C "$VIBRAVID_DIR" pull --quiet --ff-only 2>/dev/null \
-            && green "  aggiornato all'ultima versione" \
-            || yellow "  aggiornamento saltato (pull non fast-forward)"
-    else
-        yellow "  ci sono modifiche locali non committate: aggiornamento saltato"
-    fi
-    if [ -x "$VIBRAVID_DIR/venv/bin/python" ]; then
-        green "  venv Python già configurato"
-    fi
-else
-    bold "► Preparo VibraVid (motore di download online)…"
-
-    if ! command -v python3 >/dev/null 2>&1; then
-        red "✗ python3 non trovato sul sistema."
-        echo "  Su macOS 14+ dovrebbe esserci già; se manca:  brew install python@3.13"
-        exit 1
-    fi
-    green "✓ Python $(python3 --version | awk '{print $2}')"
-
-    git clone --depth 1 "$VIBRAVID_REPO" "$VIBRAVID_DIR"
+if ! command -v python3 >/dev/null 2>&1; then
+    red "✗ python3 non trovato sul sistema."
+    echo "  Su macOS 14+ dovrebbe esserci già; se manca:  brew install python@3.13"
+    exit 1
 fi
 
-# venv + dipendenze Python. Se il venv c'è già saltiamo, altrimenti lo
-# creiamo e installiamo requirements una volta sola.
+if [ ! -d "$VIBRAVID_DIR/.git" ]; then
+    bold "► Scarico VibraVid (motore di download online)…"
+    mkdir -p "$VIBRAVID_DIR"
+    git -C "$VIBRAVID_DIR" init --quiet
+    vibravid_checkout
+    green "✓ VibraVid installato"
+
+elif [ ! -f "$VIBRAVID_DIR/Conf/config.toml" ]; then
+    # Installazione con la vecchia versione (1.2.x): configurazione in JSON e
+    # sito ormai bloccato (errore 403). Si aggiorna lasciando intatti i download
+    # (cartella Video) e l'ambiente Python, e si salva tutto il resto.
+    yellow "► VibraVid è una versione vecchia: la aggiorno."
+    stamp="$(date +%Y%m%d-%H%M%S)"
+    if [ -d "$VIBRAVID_DIR/Conf" ]; then
+        cp -R "$VIBRAVID_DIR/Conf" "$VIBRAVID_DIR/Conf.backup-$stamp"
+        echo "  copia della vecchia configurazione: $VIBRAVID_DIR/Conf.backup-$stamp"
+    fi
+    git -C "$VIBRAVID_DIR" branch -f "backup-prima-dell-aggiornamento-$stamp" HEAD 2>/dev/null || true
+    echo "  codice precedente conservato nel ramo git: backup-prima-dell-aggiornamento-$stamp"
+    vibravid_checkout
+    green "✓ VibraVid aggiornato (i video già scaricati non sono stati toccati)"
+
+else
+    green "✓ VibraVid già presente in $VIBRAVID_DIR"
+    if [ "$(git -C "$VIBRAVID_DIR" rev-parse HEAD 2>/dev/null)" != "$VIBRAVID_COMMIT" ]; then
+        yellow "  riporto VibraVid alla versione provata con questa app"
+        vibravid_checkout
+    fi
+fi
+
+# Ambiente Python + dipendenze. pip salta quello che è già a posto, quindi si
+# può rieseguire senza costi: serve a recuperare le librerie nuove dopo un
+# aggiornamento di VibraVid.
 if [ ! -x "$VIBRAVID_DIR/venv/bin/python" ]; then
     bold "► Creo l'ambiente Python di VibraVid (una volta sola, ~1-2 minuti)…"
     python3 -m venv "$VIBRAVID_DIR/venv"
     "$VIBRAVID_DIR/venv/bin/pip" install --quiet --upgrade pip
-    "$VIBRAVID_DIR/venv/bin/pip" install --quiet -r "$VIBRAVID_DIR/requirements.txt"
-    # curl_cffi >= 0.15 non si importa con Python di conda/pyenv su macOS
-    # (symbol not found '_CFRelease'): si blocca alla 0.14.
-    "$VIBRAVID_DIR/venv/bin/pip" install --quiet "curl_cffi<0.15"
-    green "✓ VibraVid pronto"
+fi
+"$VIBRAVID_DIR/venv/bin/pip" install --quiet -r "$VIBRAVID_DIR/requirements.txt"
+# curl_cffi >= 0.15 non si importa con Python di conda/pyenv su macOS
+# (symbol not found '_CFRelease'): si blocca alla 0.14.
+"$VIBRAVID_DIR/venv/bin/pip" install --quiet "curl_cffi<0.15"
+green "✓ Ambiente Python di VibraVid pronto"
+
+# Primo avvio: VibraVid scarica l'elenco dei siti (Conf/domains.json), che la
+# schermata Impostazioni → Domini mostra. Senza questo la tabella sarebbe vuota.
+( cd "$VIBRAVID_DIR" && "$VIBRAVID_DIR/venv/bin/python" -c \
+    "from VibraVid.utils import config_manager as m; m._ensure_domains()" >/dev/null 2>&1 ) || true
+if [ -f "$VIBRAVID_DIR/Conf/domains.json" ]; then
+    green "✓ Elenco dei siti scaricato"
+else
+    yellow "  elenco dei siti non ancora scaricato (internet assente?): lo farà VibraVid al primo download"
 fi
 
 # ── 4. Compilazione ─────────────────────────────────────────────────────

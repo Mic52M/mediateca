@@ -105,10 +105,12 @@ private struct DomainsTable: View {
                     .buttonStyle(PrimaryButtonStyle(compact: true))
             }
 
+            autoUpdateToggle
+
             if bridge.domains.isEmpty {
                 emptyState
             } else {
-                Text("Modifica dominio e URL completo quando un sito cambia indirizzo. "
+                Text("Modifica l'indirizzo quando un sito cambia. "
                    + "Le modifiche entrano in vigore al prossimo download.")
                     .font(.callout).foregroundStyle(.secondary)
 
@@ -118,12 +120,6 @@ private struct DomainsTable: View {
                             .font(.callout).bold()
                     }
                     .width(min: 140, ideal: 170)
-
-                    TableColumn("Dominio") { entry in
-                        TextField("es. eu", text: entry.domain)
-                            .textFieldStyle(.roundedBorder)
-                    }
-                    .width(min: 90, ideal: 110)
 
                     TableColumn("URL completo") { entry in
                         TextField("https://sito.tld/", text: entry.fullURL)
@@ -171,6 +167,35 @@ private struct DomainsTable: View {
         } message: {
             Text("La voce sparisce da questa tabella e dal file di configurazione.")
         }
+    }
+
+    /// Con l'aggiornamento automatico acceso VibraVid, a ogni avvio, scarica
+    /// l'elenco dei siti da GitHub e **sovrascrive** domains.json: gli indirizzi
+    /// scritti qui sparirebbero prima del download.
+    private var autoUpdateToggle: some View {
+        let on = bridge.configBool("DEFAULT", "fetch_domain_online", default: true)
+        return VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+            Toggle(isOn: Binding(
+                get: { on },
+                set: { bridge.setConfig("DEFAULT", "fetch_domain_online", $0); bridge.saveConfig() }
+            )) {
+                Text("Aggiorna gli indirizzi dei siti da internet a ogni avvio")
+                    .font(.callout).bold()
+            }
+            .toggleStyle(.switch)
+            .tint(Theme.accent)
+
+            Text(on
+                 ? "Acceso: VibraVid tiene gli indirizzi aggiornati da solo, ma le modifiche fatte qui "
+                 + "vengono cancellate a ogni download. Spegni per usare i tuoi."
+                 : "Spento: VibraVid usa gli indirizzi di questa tabella e non li cambia più da solo. "
+                 + "Se un sito cambia dominio dovrai aggiornarlo tu.")
+                .font(.caption)
+                .foregroundStyle(on ? Theme.accent : Theme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(Theme.Spacing.md)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.md))
     }
 
     private var emptyState: some View {
@@ -361,8 +386,7 @@ private struct DownloadPreferences: View {
                             .monospacedDigit().frame(width: 32, alignment: .leading)
                     }.frame(width: 180)
                 }
-                Toggle("Download concorrente", isOn: boolBinding("DOWNLOAD", "concurrent_download"))
-                Toggle("Selezione automatica quando c'è un unico risultato",
+                    Toggle("Selezione automatica quando c'è un unico risultato",
                        isOn: boolBinding("DOWNLOAD", "auto_select"))
                 Toggle("Pulisci cartella tmp a fine download",
                        isOn: boolBinding("DOWNLOAD", "cleanup_tmp_folder"))
@@ -455,26 +479,30 @@ private struct LoginEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("Credenziali e token per i provider che li richiedono. "
-               + "I valori sono salvati in `Conf/login.json` di VibraVid, in chiaro.")
+            Text("Credenziali e token per i servizi che li richiedono. "
+               + "I valori sono salvati in `Conf/login.toml` di VibraVid, in chiaro. "
+               + "I cookie (Crunchyroll, Prime Video…) sono lunghi e vanno incollati "
+               + "direttamente in quel file.")
                 .font(.callout).foregroundStyle(.secondary)
 
-            group("Provider generici") {
-                secure("TMDB (API key)", path: ["Provider", "tmdb"])
-            }
             group("Crunchyroll") {
                 secure("device_id", path: ["crunchyroll", "device_id"])
-                secure("etp_rt",    path: ["crunchyroll", "etp_rt"])
             }
             group("Tubi") {
                 plain("Email",    path: ["tubi", "email"])
                 secure("Password", path: ["tubi", "password"])
             }
             group("Mediaset Infinity") {
-                secure("adminBeToken", path: ["mediasetinfinity", "adminBeToken"])
+                secure("rtilogin_acd", path: ["mediasetinfinity", "rtilogin_acd"])
             }
             group("Discovery+") {
                 secure("st (session token)", path: ["discoveryplus", "st"])
+            }
+            group("HBO Max") {
+                secure("st (session token)", path: ["hbomax", "st"])
+            }
+            group("Paramount+") {
+                secure("st (session token)", path: ["paramountplus", "st"])
             }
 
             HStack {

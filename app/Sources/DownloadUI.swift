@@ -263,26 +263,31 @@ private struct SearchForm: View {
 
     @State private var query: String = ""
     @State private var providerID: Int = 0
-    @State private var trackPreset: String = ""
+    @State private var languageID: String = "default"
     @State private var target = DestinationChoice()
 
-    // Preset di VibraVid (Conf/track_preset.py): audio × sottotitoli.
-    //  1=dub          (solo audio italiano)
-    //  2=dub-ita      (audio italiano + sottotitoli italiani)
-    //  5=org          (solo lingua originale, niente sottotitoli)
-    //  6=org-ita      (originale + sottotitoli italiani) — il classico "sub-ita"
-    //  7=org-eng      (originale + sottotitoli inglesi)
-    //  9=multi        (tutte le tracce audio, niente sottotitoli)
-    // 12=multi-all    (tutte le tracce audio + tutti i sottotitoli)
-    private let presets: [(key: String, label: String)] = [
-        ("",   "Come da impostazioni"),
-        ("1",  "🇮🇹  Solo audio italiano"),
-        ("2",  "🇮🇹  Italiano (audio + sottotitoli)"),
-        ("6",  "Originale + sottotitoli italiani"),
-        ("5",  "Solo lingua originale"),
-        ("7",  "Originale + sottotitoli inglesi"),
-        ("9",  "Tutte le tracce audio"),
-        ("12", "Tutto (audio + sottotitoli)"),
+    /// Scelte di lingua. Dalla 1.5 VibraVid non ha più i preset numerati: ogni
+    /// scelta è una coppia di filtri per `-sa` (audio) e `-ss` (sottotitoli).
+    /// Sintassi: "ita|it" = quelle lingue, "false" = nessuna traccia, "all" =
+    /// tutte, "…|best" = se non c'è, la migliore disponibile.
+    private struct LanguageChoice: Hashable {
+        var id: String
+        var label: String
+        var audio: String?
+        var subtitle: String?
+    }
+
+    private static let originalAudio = "eng|en|jpn|ja|best"
+
+    private let presets: [LanguageChoice] = [
+        LanguageChoice(id: "default", label: "Come da impostazioni", audio: nil, subtitle: nil),
+        LanguageChoice(id: "ita", label: "🇮🇹  Solo audio italiano", audio: "ita|it", subtitle: "false"),
+        LanguageChoice(id: "ita-sub", label: "🇮🇹  Italiano (audio + sottotitoli)", audio: "ita|it", subtitle: "ita|it"),
+        LanguageChoice(id: "org-ita", label: "Originale + sottotitoli italiani", audio: Self.originalAudio, subtitle: "ita|it"),
+        LanguageChoice(id: "org", label: "Solo lingua originale", audio: Self.originalAudio, subtitle: "false"),
+        LanguageChoice(id: "org-eng", label: "Originale + sottotitoli inglesi", audio: Self.originalAudio, subtitle: "eng|en"),
+        LanguageChoice(id: "audio-all", label: "Tutte le tracce audio", audio: "all", subtitle: "false"),
+        LanguageChoice(id: "all", label: "Tutto (audio + sottotitoli)", audio: "all", subtitle: "all"),
     ]
 
     var body: some View {
@@ -314,12 +319,12 @@ private struct SearchForm: View {
                 }
                 field("Lingua preferita") {
                     VStack(alignment: .leading, spacing: 4) {
-                        Picker("", selection: $trackPreset) {
-                            ForEach(presets, id: \.key) { p in Text(p.label).tag(p.key) }
+                        Picker("", selection: $languageID) {
+                            ForEach(presets, id: \.id) { p in Text(p.label).tag(p.id) }
                         }
                         .labelsHidden()
                         .frame(width: 320)
-                        Text("Se la traccia scelta non c'è, VibraVid usa la migliore alternativa disponibile.")
+                        Text("Se la lingua scelta non c'è, VibraVid usa la traccia migliore disponibile.")
                             .font(.caption2)
                             .foregroundStyle(Theme.textTertiary)
                             .frame(maxWidth: 320, alignment: .leading)
@@ -361,8 +366,9 @@ private struct SearchForm: View {
         guard !q.isEmpty else { return }
         runner.pendingTarget = target.resolve(suggestedTitle: q)
         let name = bridge.providers.first { $0.index == providerID }?.name ?? "\(providerID)"
+        let choice = presets.first { $0.id == languageID }
         runner.searchAndDownload(query: q, siteName: name,
-                                 trackPresetKey: trackPreset.isEmpty ? nil : trackPreset)
+                                 audio: choice?.audio, subtitle: choice?.subtitle)
     }
 }
 
@@ -398,12 +404,22 @@ private struct QuestionPanel: View {
 
     /// Traduce le domande note di VibraVid in italiano comprensibile.
     private var friendlyQuestion: String {
-        let q = prompt.question.lowercased()
-        if q.contains("media index") || q.contains("insert index") {
+        // VibraVid 1.5 pone la stessa domanda ("Insert media index…") per titolo,
+        // stagione ed episodio: si distingue dalle colonne della tabella.
+        let q = (prompt.context.isEmpty ? prompt.question : prompt.context).lowercased()
+        let headers = (prompt.table?.headers ?? []).map { $0.lowercased() }
+        if headers.contains(where: { $0.contains("duration") || $0.contains("durata") }) {
+            return "Quali episodi vuoi scaricare?"
+        }
+        if let table = prompt.table, table.rows.first?.contains(where: {
+            $0.lowercased().hasPrefix("season") || $0.lowercased().hasPrefix("stagione")
+        }) == true {
+            return "Quale stagione vuoi scaricare?"
+        }
+        if q.contains("media index") || q.contains("insert index") || q.contains("to download all media") {
             return "Quale vuoi scaricare?"
         }
-        if q.contains("season") { return "Quale stagione?" }
-        if q.contains("episode") { return "Quali episodi?" }
+        if q.contains("press enter") { return "Premi Invio per la pagina successiva" }
         return prompt.question
     }
 
@@ -495,6 +511,10 @@ private struct ResultList: View {
         for (i, cell) in row.enumerated() {
             guard i != indexCol, i != nameCol else { continue }
             let v = cell.trimmingCharacters(in: .whitespaces)
+                .replacingOccurrences(of: "[", with: "")
+                .replacingOccurrences(of: "]", with: "")
+                .replacingOccurrences(of: "'", with: "")
+                .trimmingCharacters(in: .whitespaces)
             if !v.isEmpty && v != "-" && v != "N/A" { out.append(v) }
         }
         return out

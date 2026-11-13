@@ -28,8 +28,11 @@ Lo script fa tutto in fila:
 
 1. verifica **ffmpeg** (con Homebrew se disponibile)
 2. verifica gli **Xcode Command Line Tools** (`swiftc`)
-3. clona **VibraVid** in `~/Documents/VibraVid` e prepara il suo venv
-   Python — è il motore del pannello "Scarica" nell'app
+3. installa **VibraVid** (il progetto originale, alla versione provata con
+   l'app) in `~/Documents/VibraVid` e prepara il suo venv Python: è il
+   motore del pannello "Scarica". Se trova una versione vecchia la aggiorna,
+   dopo aver salvato la vecchia configurazione e senza toccare i video già
+   scaricati
 4. compila Mediateca e la installa in `~/Applications/Mediateca.app`
 5. apre l'app
 

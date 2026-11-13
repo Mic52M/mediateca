@@ -45,6 +45,9 @@ final class VibraVidRunner: ObservableObject {
 
     struct PendingPrompt: Equatable {
         var question: String
+        /// Ultime righe prima del cursore: la domanda di VibraVid può essere su
+        /// due righe e le istruzioni ("Press Enter…") stanno sopra.
+        var context: String = ""
         var table: PromptTable?
         /// Insieme di suggerimenti rapidi cliccabili (es. "*", "q", "Invio").
         var quickReplies: [String]
@@ -98,18 +101,27 @@ final class VibraVidRunner: ObservableObject {
     /// Avvia una ricerca su un sito specifico. Tutto il resto (scelta titolo,
     /// stagione, episodi, tracce) viene gestito interattivamente dai prompt
     /// che l'utente vede nel pannello sopra la console.
-    func searchAndDownload(query: String, siteName: String, trackPresetKey: String?) {
-        var args = ["-s", query, "--site", siteName, "--close-console", "true"]
-        if let trackPresetKey, !trackPresetKey.isEmpty {
-            args += ["--tracks", trackPresetKey]
-        }
+    /// `audio` e `subtitle` sono filtri di VibraVid ("ita|it", "all", "false" per
+    /// escludere); se nil si usano quelli di config.toml.
+    func searchAndDownload(query: String, siteName: String, audio: String?, subtitle: String?) {
+        var args = ["-i", siteName, "-s", query] + closeConsoleArgs()
+        if let audio, !audio.isEmpty { args += ["-sa", audio] }
+        if let subtitle, !subtitle.isEmpty { args += ["-ss", subtitle] }
         launch(args: args)
+    }
+
+    /// `--close-console` è un'opzione "persistente" per VibraVid: quando c'è,
+    /// salva su disco tutta la configurazione, compresi i filtri `-sa/-ss` di
+    /// questa sola esecuzione, che diventerebbero i nuovi predefiniti. Il
+    /// default del file è già `true`, quindi lo passiamo solo se serve.
+    private func closeConsoleArgs() -> [String] {
+        bridge.configBool("DEFAULT", "close_console", default: true) ? [] : ["--close-console", "true"]
     }
 
     /// Ricerca globale su tutti i siti (categoria opzionale). Anche qui le
     /// scelte successive avvengono via prompt.
     func globalSearch(query: String, category: Int?) {
-        var args = ["-s", query, "--global", "--close-console", "true"]
+        var args = ["-s", query, "--global"] + closeConsoleArgs()
         if let category { args += ["--category", "\(category)"] }
         launch(args: args)
     }
@@ -125,7 +137,7 @@ final class VibraVidRunner: ObservableObject {
         keys: [String],
         drm: String
     ) {
-        var args = ["--down", url, "--no-tracks-prompt", "--close-console", "true", "--drm", drm]
+        var args = ["--down", url, "--drm", drm] + closeConsoleArgs()
         if let output, !output.isEmpty { args += ["-o", output] }
         for h in headers where !h.isEmpty { args += ["--headers", h] }
         if let licenseURL, !licenseURL.isEmpty { args += ["--license-url", licenseURL] }
@@ -183,7 +195,9 @@ final class VibraVidRunner: ObservableObject {
         let p = Process()
         p.executableURL = bridge.pythonPath
         p.currentDirectoryURL = bridge.installDir
-        p.arguments = [bridge.entryPoint.path] + args
+        // --plain-progress: senza un terminale VibraVid non disegna le barre, con
+        // questo stampa righe di avanzamento ("Vid … 54% … ETA 00:02") che leggiamo.
+        p.arguments = [bridge.entryPoint.path] + args + ["--plain-progress"]
 
         // PYTHONUNBUFFERED forza i log a comparire riga per riga invece di
         // arrivare a blocchi solo alla fine.
@@ -191,6 +205,9 @@ final class VibraVidRunner: ObservableObject {
         env["PYTHONUNBUFFERED"] = "1"
         env["FORCE_COLOR"] = "0"       // rich non stampa sequenze ANSI
         env["NO_COLOR"] = "1"
+        // Senza terminale rich userebbe 80 colonne e spezzerebbe le righe lunghe
+        // della tabella in più righe: con 200 stanno su una riga sola.
+        env["COLUMNS"] = "200"
         p.environment = env
 
         let pipe = Pipe()
@@ -296,6 +313,7 @@ final class VibraVidRunner: ObservableObject {
         let lines = text.split(separator: "\n", omittingEmptySubsequences: true)
         for raw in lines.reversed() {
             let line = raw.trimmingCharacters(in: .whitespaces)
+            if let friendly = friendlyStatus(for: line) { return friendly }
             guard line.count > 4, line.count < 160 else { continue }
             if line.hasPrefix("$") || line.hasPrefix("›") { continue }
             // Scarta righe fatte quasi solo di simboli (arte ASCII, cornici).
@@ -303,6 +321,23 @@ final class VibraVidRunner: ObservableObject {
             guard Double(letters) / Double(line.count) > 0.45 else { continue }
             return line
         }
+        return nil
+    }
+
+    /// Traduce le righe di avanzamento di VibraVid in una frase per chi non
+    /// legge i log: "Vid [H.264] 480p 1.1 Mbps  54%  80.1M / 146.4M  24M/s  ETA 00:02".
+    nonisolated static func friendlyStatus(for line: String) -> String? {
+        let l = line.trimmingCharacters(in: .whitespaces)
+        let speed = l.range(of: #"[0-9.]+[KMG]/s"#, options: .regularExpression).map { String(l[$0]) }
+        let eta = l.range(of: #"ETA\s+[0-9:]+"#, options: .regularExpression)
+            .map { String(l[$0]).replacingOccurrences(of: "ETA", with: "").trimmingCharacters(in: .whitespaces) }
+        func tail() -> String {
+            [speed, eta.map { "ne mancano \($0)" }].compactMap { $0 }.joined(separator: " · ")
+        }
+        if l.hasPrefix("Vid ") { return "Scarico il video" + (tail().isEmpty ? "…" : " — \(tail())") }
+        if l.hasPrefix("Aud ") { return "Scarico l'audio" + (tail().isEmpty ? "…" : " — \(tail())") }
+        if l.hasPrefix("Sub ") { return "Scarico i sottotitoli…" }
+        if l.contains("Join media") || l.hasPrefix("Merging") { return "Unisco video, audio e sottotitoli…" }
         return nil
     }
 
@@ -344,8 +379,10 @@ final class VibraVidRunner: ObservableObject {
             return
         }
         let table = Self.parseTable(in: tail)
-        let quick = Self.quickReplies(for: question)
-        let new = PendingPrompt(question: question, table: table, quickReplies: quick)
+        let context = Self.promptContext(in: tail)
+        let quick = Self.quickReplies(for: context)
+        let new = PendingPrompt(question: question, context: context,
+                                table: table, quickReplies: quick)
         if new != pendingPrompt { pendingPrompt = new }
     }
 
@@ -367,10 +404,20 @@ final class VibraVidRunner: ObservableObject {
         return trimmed
     }
 
+    /// Le ultime righe di testo prima del cursore, unite: in VibraVid 1.5 la
+    /// domanda occupa due righe ("Insert media index '1', '*'…" / "'3-*' to
+    /// download from… :") e sopra c'è "Press Enter for next page, 'q' to quit.".
+    nonisolated static func promptContext(in log: String, lines count: Int = 3) -> String {
+        log.split(separator: "\n", omittingEmptySubsequences: true)
+            .suffix(count)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .joined(separator: " ")
+    }
+
     nonisolated static func quickReplies(for question: String) -> [String] {
         let q = question.lowercased()
         var replies: [String] = []
-        if q.contains("* to download all") || q.contains("* to")   { replies += ["*"] }
+        if q.contains("to download all") || q.contains("'*'")      { replies += ["*"] }
         if q.contains("press enter")                                { replies += ["Invio"] }
         if q.contains("'q'") || q.contains("q to quit")             { replies += ["q"] }
         return replies
@@ -413,6 +460,11 @@ final class VibraVidRunner: ObservableObject {
         let width = headers.count
         guard width > 0 else { return nil }
 
+        // Quando una cella è troppo lunga rich la manda a capo dentro la tabella:
+        // la riga successiva ha l'indice vuoto e porta solo il resto del testo.
+        // Va riattaccata alla riga precedente, non trattata come riga nuova.
+        rawRows = mergeWrappedRows(rawRows, width: width)
+
         // Le righe con celle vuote NON vanno scartate: si normalizzano alla
         // larghezza dell'intestazione. Prima venivano perse in silenzio, e
         // un titolo senza anno o senza lingua semplicemente spariva.
@@ -423,6 +475,25 @@ final class VibraVidRunner: ObservableObject {
         }
         guard !body.isEmpty else { return nil }
         return PromptTable(headers: headers, rows: body)
+    }
+
+    /// Riattacca le righe di continuazione (prima cella vuota) alla precedente.
+    private nonisolated static func mergeWrappedRows(_ rows: [[String]], width: Int) -> [[String]] {
+        var merged: [[String]] = []
+        for (i, row) in rows.enumerated() {
+            let padded = row.count < width ? row + Array(repeating: "", count: width - row.count) : row
+            let isContinuation = i > 0 && (padded.first ?? "").isEmpty && !merged.isEmpty
+            if isContinuation {
+                var prev = merged.removeLast()
+                for c in 0..<min(width, padded.count) where !padded[c].isEmpty {
+                    prev[c] = prev[c].isEmpty ? padded[c] : prev[c] + " " + padded[c]
+                }
+                merged.append(prev)
+            } else {
+                merged.append(padded)
+            }
+        }
+        return merged
     }
 
     /// Indici della prima e ultima riga della tabella più recente.

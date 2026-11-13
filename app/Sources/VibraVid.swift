@@ -2,11 +2,10 @@ import Foundation
 import SwiftUI
 
 /// Sorgente unica per il ponte con VibraVid: individua l'installazione, legge e
-/// riscrive i tre file di configurazione, e tiene una copia in memoria dei
-/// dati che l'interfaccia visualizza.
+/// riscrive i file di configurazione (`config.toml`, `login.toml`,
+/// `domains.json`) e tiene in memoria i dati che l'interfaccia mostra.
 ///
-/// Le operazioni di scrittura sono atomiche: se ffmpeg o Mediateca dovessero
-/// crashare durante un salvataggio, il file resta comunque coerente.
+/// Le scritture sono atomiche, e per i TOML riguardano solo le righe cambiate.
 @MainActor
 final class VibraVidBridge: ObservableObject {
 
@@ -33,9 +32,10 @@ final class VibraVidBridge: ObservableObject {
     var pythonPath: URL { installDir.appendingPathComponent("venv/bin/python") }
     var entryPoint: URL { installDir.appendingPathComponent("manual.py") }
 
-    var configFile: URL { installDir.appendingPathComponent("Conf/config.json") }
+    // Dalla 1.5 di VibraVid la configurazione è in TOML; i domini restano JSON.
+    var configFile: URL { installDir.appendingPathComponent("Conf/config.toml") }
     var domainsFile: URL { installDir.appendingPathComponent("Conf/domains.json") }
-    var loginFile: URL { installDir.appendingPathComponent("Conf/login.json") }
+    var loginFile: URL { installDir.appendingPathComponent("Conf/login.toml") }
 
     /// Cartella dei download. Rispetta l'eventuale path assoluto o relativo
     /// scritto in `OUTPUT.root_path` del config.
@@ -58,6 +58,11 @@ final class VibraVidBridge: ObservableObject {
     @Published var login: [String: Any] = [:]
     @Published var loadError: String?
 
+    /// Copia dei valori letti dal file: al salvataggio si riscrivono solo le
+    /// chiavi che l'utente ha davvero cambiato.
+    private var configSnapshot: [String: [String: Any]] = [:]
+    private var loginSnapshot: [String: [String: Any]] = [:]
+
     struct Provider: Identifiable, Hashable {
         var index: Int
         var name: String
@@ -70,7 +75,6 @@ final class VibraVidBridge: ObservableObject {
     struct DomainEntry: Identifiable, Hashable {
         var id = UUID()
         var key: String             // es. "streamingcommunity"
-        var domain: String          // es. "eu"
         var fullURL: String         // es. "https://streamingcommunityz.eu/"
         var lastStatus: Int?        // ultimo HTTP status (informativo)
         var timeChange: String?
@@ -109,7 +113,7 @@ final class VibraVidBridge: ObservableObject {
             let initFile = dir.appendingPathComponent("__init__.py")
             let text = (try? String(contentsOf: initFile, encoding: .utf8)) ?? ""
             let index = Self.firstInt(in: text, key: "indice") ?? 999
-            let category = Self.firstString(in: text, key: "use_for") ?? "generic"
+            let category = Self.firstString(in: text, key: "_useFor") ?? "generic"
             found.append(Provider(index: index, name: name, category: category.lowercased()))
         }
         providers = found.sorted { $0.index < $1.index }
@@ -140,7 +144,6 @@ final class VibraVidBridge: ObservableObject {
             let v = obj[key] ?? [:]
             return DomainEntry(
                 key: key,
-                domain: v["domain"] as? String ?? "",
                 fullURL: v["full_url"] as? String ?? "",
                 lastStatus: v["last_status"] as? Int,
                 timeChange: v["time_change"] as? String
@@ -149,31 +152,32 @@ final class VibraVidBridge: ObservableObject {
     }
 
     private func loadConfig() {
-        guard let raw = try? Data(contentsOf: configFile),
-              let obj = try? JSONSerialization.jsonObject(with: raw) as? [String: [String: Any]]
-        else { config = [:]; return }
-        config = obj
+        guard let text = try? String(contentsOf: configFile, encoding: .utf8) else {
+            config = [:]; configSnapshot = [:]; return
+        }
+        config = TomlLite.parse(text)
+        configSnapshot = config
     }
 
     private func loadLogin() {
-        guard let raw = try? Data(contentsOf: loginFile),
-              let obj = try? JSONSerialization.jsonObject(with: raw) as? [String: Any]
-        else { login = [:]; return }
-        login = obj
+        guard let text = try? String(contentsOf: loginFile, encoding: .utf8) else {
+            login = [:]; loginSnapshot = [:]; return
+        }
+        let parsed = TomlLite.parse(text)
+        login = parsed
+        loginSnapshot = parsed
     }
 
     // MARK: - Salvataggio
 
-    /// Riscrive il file domains.json a partire dalla tabella in memoria,
-    /// preservando i campi che l'UI non modifica (es. `old_domain`).
-    /// Aggiunge una riga vuota alla tabella dei domini. L'utente digita
-    /// nome, dominio e URL, poi salva. Se il nome è duplicato non facciamo
-    /// nulla (la voce esiste già e verrebbe sovrascritta dal save).
+    /// Aggiunge una riga alla tabella dei domini. L'utente digita l'URL e poi
+    /// salva. Se il nome è duplicato non facciamo nulla (la voce esiste già e
+    /// verrebbe sovrascritta dal save).
     func addDomain(name: String) {
         let key = name.trimmingCharacters(in: .whitespaces).lowercased()
         guard !key.isEmpty else { return }
         guard !domains.contains(where: { $0.key == key }) else { return }
-        domains.append(DomainEntry(key: key, domain: "", fullURL: "https://"))
+        domains.append(DomainEntry(key: key, fullURL: "https://"))
         domains.sort { $0.key < $1.key }
     }
 
@@ -189,6 +193,8 @@ final class VibraVidBridge: ObservableObject {
         writeJSON(raw, to: domainsFile)
     }
 
+    /// Riscrive domains.json dalla tabella, preservando i campi che l'UI non
+    /// modifica (cronologia degli stati, scadenza SSL, ecc.).
     func saveDomains() {
         var raw: [String: [String: Any]] =
             (try? JSONSerialization.jsonObject(with: (try? Data(contentsOf: domainsFile)) ?? Data())
@@ -197,7 +203,6 @@ final class VibraVidBridge: ObservableObject {
         for entry in domains {
             var body = raw[entry.key] ?? [:]
             let normalizedURL = entry.fullURL.hasSuffix("/") ? entry.fullURL : entry.fullURL + "/"
-            body["domain"] = entry.domain
             body["full_url"] = normalizedURL
             body["time_change"] = Self.now()
             raw[entry.key] = body
@@ -206,11 +211,51 @@ final class VibraVidBridge: ObservableObject {
     }
 
     func saveConfig() {
-        writeJSON(config, to: configFile)
+        let changed = applyChanges(config, against: configSnapshot, to: configFile)
+        if changed { loadConfig() }
     }
 
     func saveLogin() {
-        writeJSON(login, to: loginFile)
+        // `login` è annidato come [sezione: [chiave: valore]]
+        var flat: [String: [String: Any]] = [:]
+        for (section, body) in login {
+            if let dict = body as? [String: Any] { flat[section] = dict }
+        }
+        let changed = applyChanges(flat, against: loginSnapshot, to: loginFile)
+        if changed { loadLogin() }
+    }
+
+    /// Scrive nel file TOML solo i valori diversi dallo snapshot, riga per
+    /// riga: commenti, array e tutto il resto restano com'erano.
+    @discardableResult
+    private func applyChanges(_ current: [String: [String: Any]],
+                              against snapshot: [String: [String: Any]],
+                              to url: URL) -> Bool {
+        guard var text = try? String(contentsOf: url, encoding: .utf8) else {
+            loadError = "Impossibile leggere \(url.lastPathComponent)."
+            return false
+        }
+        var touched = false
+        for (section, body) in current.sorted(by: { $0.key < $1.key }) {
+            for (key, value) in body.sorted(by: { $0.key < $1.key }) {
+                if let old = snapshot[section]?[key], Self.same(old, value) { continue }
+                text = TomlLite.setValue(text, section: section, key: key, value: value)
+                touched = true
+            }
+        }
+        guard touched else { return false }
+        do {
+            try text.write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            loadError = "Impossibile salvare \(url.lastPathComponent): \(error.localizedDescription)"
+            return false
+        }
+        return true
+    }
+
+    private static func same(_ a: Any, _ b: Any) -> Bool {
+        String(describing: type(of: a)) == String(describing: type(of: b))
+            && String(describing: a) == String(describing: b)
     }
 
     /// Scrittura atomica e con lo stesso stile di indentazione del file
@@ -219,7 +264,7 @@ final class VibraVidBridge: ObservableObject {
         do {
             let data = try JSONSerialization.data(
                 withJSONObject: value,
-                options: [.prettyPrinted, .sortedKeys])
+                options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
             let indented = data.reindented(fromTwoToFour: true)
             try indented.write(to: url, options: .atomic)
         } catch {
