@@ -624,9 +624,30 @@ private struct FinishedPanel: View {
     @ObservedObject var runner: VibraVidRunner
     let onNewSearch: () -> Void
 
+    /// VibraVid esce con codice 0 anche quando ogni episodio fallisce (lo
+    /// cattura e prosegue): il successo vero è aver prodotto almeno un file.
     private var success: Bool {
-        if case .done(let code) = runner.phase { return code == 0 }
+        if case .done(let code) = runner.phase {
+            return code == 0 && !runner.downloadedFiles.isEmpty
+        }
         return false
+    }
+
+    /// Motivo leggibile dedotto dall'output, se riconoscibile.
+    private var reason: String? {
+        let log = runner.log
+        if log.contains("HTTP Error 403") {
+            return "Il sito ha rifiutato la richiesta (errore 403). Succede quando "
+                 + "il sito blocca l'accesso o cambia indirizzo: riprova più tardi "
+                 + "o controlla il dominio in Impostazioni."
+        }
+        if log.contains("Could not resolve host") && !log.contains("supabase") {
+            return "Non riesco a raggiungere il sito: controlla la connessione."
+        }
+        if log.contains("No space left") {
+            return "Spazio su disco esaurito."
+        }
+        return nil
     }
 
     var body: some View {
@@ -677,7 +698,9 @@ private struct FinishedPanel: View {
         switch runner.phase {
         case .cancelled: return "Annullato"
         case .failed:    return "Non è riuscito"
-        case .done(let c): return c == 0 ? "Fatto!" : "Terminato con errori"
+        case .done(let c):
+            if c != 0 { return "Terminato con errori" }
+            return runner.downloadedFiles.isEmpty ? "Non è stato scaricato nulla" : "Fatto!"
         default: return ""
         }
     }
@@ -685,7 +708,8 @@ private struct FinishedPanel: View {
     private var detail: String {
         if case .failed(let msg) = runner.phase { return msg }
         if runner.downloadedFiles.isEmpty {
-            return "Nessun file nuovo. Apri i dettagli tecnici per capire cosa è successo."
+            return reason
+                ?? "Nessun file nuovo. Apri i dettagli tecnici per capire cosa è successo."
         }
         let n = runner.downloadedFiles.count
         return n == 1
